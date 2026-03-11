@@ -116,7 +116,7 @@ def extrair_tabela_com_camelot(caminho_arquivo, reidi_prioritario):
                         print("🧐 Peguei a informação de REIDI do texto")
                     else:
                         v_reidi = reidi_tabela # Se ela não chegou então a gente confia na da tabela mesmo
-                        print(" Não encontrei a informação de REIDI no texto, recorrendo a da tabela")
+                        print("🚩 Não encontrei a informação de REIDI no texto, recorrendo a da tabela")
                     # -------------------------------------------------------
                     
                     # Captura dos outros campos
