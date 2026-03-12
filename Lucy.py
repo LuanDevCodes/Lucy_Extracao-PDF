@@ -6,11 +6,14 @@ import os # Para poder conversar com o SO
 import json # Precisa dela para a geração dos arquivos JSON que serão o log do projeto
 import re # Vem de Regex, é especialista em padões, não procura palavras em si. É muito importante para capturar datas e números
 import camelot # Especializada em extrair informações de PDF's em coordenadas espaciais (x e Y), uso em conjunto com a pypdf
+import requests # Necessária para a comunicação direta com a API
 from pypdf import PdfReader # Para trabalharmos com os PDF's, descobri ao longo de testes que ela n é boa com tabelas
 from datetime import datetime, timedelta # O timedelta é para fazer as contas usando as horas, é bem útil
 from pathlib import Path # Usada quando precisamos navegar por pastas de arquivos
 from dotenv import load_dotenv # Para carregar o arquivo .env, com ele eu consigo trancar tudo e deixar o repositório público :D
 
+# --------------------------------------------------------------------------------------------------------------------
+# ORGANIZANDO AS VARIÁVEIS GLOBAIS
 # --------------------------------------------------------------------------------------------------------------------
 # Carrega as variáveis do arquivo .env
 load_dotenv()
@@ -18,6 +21,7 @@ load_dotenv()
 # Criando as variáveis para as pastas, deixo tudo no dotenv tbm
 pasta_pdf = os.getenv("PASTA_PDF")
 pasta_json = os.getenv("PASTA_JSON")
+url_api = os.getenv("URL_API")
 
 # Data de corte: ela só processará arquivos modificados após esta data, separei no formato Br pra ficar mais fácil e legível
 d = int(os.getenv("DIA_CORTE"))
@@ -28,10 +32,12 @@ a = int(os.getenv("ANO_CORTE"))
 data_corte = datetime(a, m, d)
 
 # --------------------------------------------------------------------------------------------------------------------
-# ********************************************************************************************************************
+# ORGANIZANDO AS FUNÇÕES PRINCIPAIS DO PROJETO
 # --------------------------------------------------------------------------------------------------------------------
 
 # O código é dividido por funções especializadas, cada uma responsável por uma parte
+
+# ----------------------------------------------------------
 
 # Função responsável por extrair todo o texto do PDF
 def extrair_texto_do_pdf(caminho_arquivo):
@@ -44,6 +50,10 @@ def extrair_texto_do_pdf(caminho_arquivo):
     except Exception as e:
         print(f"❌ Erro ao ler o arquivo {caminho_arquivo}: {e}")
         return None
+
+# -------------------------------
+# *******************************
+# -------------------------------
 
 # Função responsável por utilizar o camelot para a extração dos dados da tabela, com o pypdf isso é muito complicado
 def extrair_tabela_com_camelot(caminho_arquivo, reidi_prioritario):
@@ -82,21 +92,26 @@ def extrair_tabela_com_camelot(caminho_arquivo, reidi_prioritario):
                 # Mapeamos as colunas baseadas na linha do cabeçalho
                 colunas = df.iloc[idx_cabecalho].tolist()
                 
+                # -------------------------------
+                # **********SUB-FUNÇÃO***********
+                # -------------------------------
+                
+                # Sub-função para buscar as colunas corretas pelo nome, isso é preciso pq elas podem mudar de posição
                 def buscar_col(termos):
                     for i, c in enumerate(colunas):
                         if any(t.upper() in str(c).upper() for t in termos): return i
                     return -1
 
-                idx_item = buscar_col(["ITEM"])
-                idx_data = buscar_col(["DATA", "REMESSA"])
-                idx_desc = buscar_col(["DESCRIÇÃO", "PRODUTO"])
-                idx_valor = buscar_col(["TOTAL"])
-                idx_reidi = buscar_col(["REIDI"])
+                coluna_item = buscar_col(["ITEM"])
+                coluna_data = buscar_col(["DATA", "REMESSA"])
+                coluna_proj = buscar_col(["DESCRIÇÃO", "PRODUTO"])
+                coluna_valor = buscar_col(["TOTAL"])
+                coluna_reidi = buscar_col(["REIDI"])
 
                 for _, linha in df_dados.iterrows():
                     
                     # Limpeza e Captura Básica
-                    v_item = str(linha[idx_item]).strip() if idx_item != -1 else ""
+                    v_item = str(linha[coluna_item]).strip() if coluna_item != -1 else ""
                     
                     # Itens de pedido costumam ser 00010, 00020... 
                     # Se vier "UA", "TOTAL" ou vazio, a Lucy descarta na hora
@@ -106,18 +121,14 @@ def extrair_tabela_com_camelot(caminho_arquivo, reidi_prioritario):
                     # Capturando o RAIDI usando a lógica de verificação de dois fatores
                     # Pegamos a opinião da tabela (Trava de segurança)
                     reidi_tabela = "NÃO"
-                    if idx_reidi != -1:
-                        conteudo = str(linha[idx_reidi]).strip().upper()
+                    if coluna_reidi != -1:
+                        conteudo = str(linha[coluna_reidi]).strip().upper()
                         
                         # só é SIM se estiver escrito SIM ou tiver um 'X'
                         if conteudo in ["SIM", "X", "S"]:
                             reidi_tabela = "SIM"
                     
-                    # -------------------------------------------------------
-                    # Decisão Final (Texto manda na Tabela)
-                    # Se achamos a informação clara no texto (reidi_prioritario), usamos ela
-                    # Se não achamos no texto, confiamos na tabela
-                    
+                    # Se achamos a informação clara no texto (reidi_prioritario), usamos ela, senão, confiamos na tabela
                     # Basicamente verifica se ele existe, ou se recebemos algo, 
                     # nesse caso é a mesma coisa que validar se ela chegou mesmo
                     if reidi_prioritario:
@@ -126,20 +137,22 @@ def extrair_tabela_com_camelot(caminho_arquivo, reidi_prioritario):
                     else:
                         v_reidi = reidi_tabela # Se ela não chegou então a gente confia na da tabela mesmo
                         print("🚩 Não encontrei a informação de REIDI no texto, recorrendo a da tabela")
-                    # -------------------------------------------------------
                     
-                    # Captura dos outros campos
-                    v_data = str(linha[idx_data]).strip() if idx_data != -1 else ""
-                    v_valor = str(linha[idx_valor]).strip() if idx_valor != -1 else "0,00"
+                    # Captura bruta da data de remessa
+                    v_data_re_bruta = str(linha[coluna_data]).strip() if coluna_data != -1 else ""
                     
-                    # O [./] diz ao Python: "Procure um ponto OU uma barra aqui", as datas geralmente usam ponto nos PDF's
-                    if not re.search(r"\d{2}[./]\d{2}[./]\d{4}", v_data):
-                        continue
-
-                    # E na hora de salvar, garantimos que no JSON vire sempre o modelo data com barra
-                    data_formatada = v_data.replace(".", "/")
-
-                    # Buscando pela descrição
+                    # limpeza na data da remessa também
+                    # Remove pontos, barras ou traços para padronizar e depois inverte
+                    v_data_re_limpa = v_data_re_bruta.replace(".", "/") # Garante que tudo vire barra primeiro
+                    
+                    # Invertendo a data de remessa para o formato que é aceito no DB
+                    if "/" in v_data_re_limpa:
+                        dia, mes, ano = v_data_re_limpa.split("/")
+                        data_remessa_db = f"{ano}-{mes}-{dia}" # Formato DB: YYYY-MM-DD
+                    else:
+                        data_remessa_db = v_data_re_limpa # Fallback caso falhe, voltando pra versão anterior as mudanças
+                      
+                    # Buscando pela descrição utilizando uma sub-função
                     def obter_desc_real(linha_atual, idx_base):
                         
                         # Candidatos: a coluna alvo, a anterior e a próxima
@@ -159,51 +172,101 @@ def extrair_tabela_com_camelot(caminho_arquivo, reidi_prioritario):
                         return "Descrição não localizada"
 
                     # Aplicando a busca
-                    v_desc_bruta = obter_desc_real(linha, idx_desc)
+                    v_proj_bruto = obter_desc_real(linha, coluna_proj)
 
                     # Lógica do Traço, com ela conseguimos separar a descrição e pegar apenas o número
-                    partes = v_desc_bruta.split("-", 1)
+                    partes = v_proj_bruto.split("-", 1)
                     if len(partes) > 1 and any(c.isdigit() for c in partes[0]):
-                        descricao_final = partes[0].strip()
+                        projeto_final = partes[0].strip()
                     else:
-                        descricao_final = v_desc_bruta
+                        projeto_final = v_proj_bruto
 
                     # Limpeza final de resquícios de "UA" que possam ter grudado, é importante pq os dados estavam misturando
-                    descricao_final = re.sub(r"\s+UA\s+\d+", "", descricao_final, flags=re.IGNORECASE).strip()
-                        
+                    projeto_final = re.sub(r"\s+UA\s+\d+", "", projeto_final, flags=re.IGNORECASE).strip()
+                    
+                    # Dentro do loop da extrair_tabela_com_camelot
+                    v_valor_bruto = str(linha[coluna_valor]).strip() if coluna_valor != -1 else "0,00"
+
+                    # Limpeza para virar número: remove ponto de milhar e troca vírgula decimal por ponto
+                    v_valor_limpo = v_valor_bruto.replace(".", "").replace(",", ".")
+
+                    # IS_REIDI é uma variável booleana (True/False), é uma convenção entre programadores experientes usar o is_
+                    # pra indicar que a variável guarda um valor booleano
+                    if v_reidi == "SIM":
+                        is_reidi = True   # Atribui o valor Booleano Verdadeiro
+                    else:
+                        is_reidi = False  # Atribui o valor Booleano Falso
+
                     itens_pedido.append({
                         "item": v_item,
-                        "data_remessa": v_data.replace(".", "/"),
-                        "descricao": descricao_final,
-                        "valor_total": v_valor,
-                        "reidi": v_reidi
+                        "data_remessa": data_remessa_db,
+                        "projeto": projeto_final,
+                        "valor_total": v_valor_limpo,
+                        "reidi": is_reidi 
                     })
-                    
+                                                
     except Exception as e:
         print(f"⚠️ Erro no Camelot: {e}")
         
     return itens_pedido
 
+# -------------------------------
+# *******************************
+# -------------------------------
+
 # Função revisada para processar o cabeçalho e chamar o Camelot para a tabela
 def processar_informacoes(texto_bruto, caminho_arquivo):
     
+    # Razão Social: Geralmente a primeira linha, pegamos o texto que vem antes de "Dados de Faturamento"
+    match_razao = re.search(r"^(.*?)(?=\nDados de Faturamento)", texto_bruto, re.DOTALL | re.MULTILINE)
+    v_razao = match_razao.group(1).strip() if match_razao else "Razão Social não encontrada"
+    
+    # Endereço: Capturamos o bloco e fatiamos depois
+    match_end_completo = re.search(r"Dados de Faturamento\s+(.+?)(?=\s*CNPJ:)", texto_bruto, re.DOTALL)
+    end_bruto = match_end_completo.group(1).replace("\n", " ").strip() if match_end_completo else ""
+    
+   # Fazendo uma limpeza e separação no endereço
+    logradouro, numero_end, cep = "Não encontrado", "S/N", "00000-000"
+    
+    if end_bruto:
+        
+        # Pega o CEP primeiro (ele é o âncora)
+        m_cep = re.search(r"\d{5}-\d{3}", end_bruto)
+        if m_cep: 
+            cep = m_cep.group()
+            
+            # Removemos o CEP da string para ele não atrapalhar a busca do número da casa
+            end_sem_cep = end_bruto.replace(cep, "").strip()
+        
+        # Busca o número (sequência de dígitos que pode ter . ou -)
+        # Procuramos o número que costuma vir após o nome da rua
+        m_num = re.search(r"\s(\d+[\d.-]*)\b", end_sem_cep)
+        if m_num:
+            numero_end = m_num.group(1)
+            
+            # Logradouro é tudo o que vem antes do número
+            pos_num = m_num.start()
+            logradouro = end_sem_cep[:pos_num].strip()
+            
     # Captura de Campos Simples (Regex)
+    
+    # Pegando o N° do PR
     match_pr = re.search(r"Nº do PR:\s*(.+)", texto_bruto)
     v_pr = match_pr.group(1).strip() if match_pr else "Não encontrado"
 
-    match_data = re.search(r"Data:\s*(\d{2}[./-]\d{2}[./-]\d{4})", texto_bruto)
-    v_data = match_data.group(1).replace(".", "/").replace("-", "/") if match_data else "Não encontrada"
+    # Pegando a Data
+    match_data = re.search(r"Data:\s*(\d{2})[./](\d{2})[./](\d{4})", texto_bruto)
+    data_pedido_db = f"{match_data.group(3)}-{match_data.group(2)}-{match_data.group(1)}" if match_data else "Não encontrado"
 
-    match_end = re.search(r"Dados de Faturamento\s+(.+?)(?=\s*CNPJ:)", texto_bruto, re.DOTALL)
-    v_end = match_end.group(1).replace("\n", ", ").strip() if match_end else "Não encontrado"
-
+    # Pegando o CNPJ
     match_cnpj = re.search(r"CNPJ:\s*([\d\./-]+)", texto_bruto)
     v_cnpj = match_cnpj.group(1) if match_cnpj else "Não encontrado"
 
+    # Pegando o IE
     match_ie = re.search(r"IE:\s*([\d.]+)", texto_bruto)
     v_ie = match_ie.group(1) if match_ie else "Não encontrado"
     
-    # O Regex busca: número + parênteses + REIDI: + SIM ou NÃO, essaé a prioridade em cima da tabela, uma trava de segurança
+    # O Regex busca: número + parênteses + REIDI: + SIM ou NÃO, essa é a prioridade em cima da tabela, uma trava de segurança
     # Ex: 4)REIDI: NÃO ou 1) REIDI: SIM
     match_reidi_global = re.search(r"\d+\)\s*REIDI:\s*(SIM|NÃO)", texto_bruto, re.IGNORECASE)
     reidi_prioritario = match_reidi_global.group(1).upper() if match_reidi_global else None
@@ -223,6 +286,7 @@ def processar_informacoes(texto_bruto, caminho_arquivo):
             linha_regiao = -1
             
             # Localiza o simbolo # (Procura a âncora), com ele fica muito mais fácil se guiar e limitar a área de busca
+            # A variável de região, apesar de ser coletada não é passada para API ou JSON, é mais para localização no texto
             for l in range(len(df_rodape)):
                 for c in range(len(df_rodape.columns)):
                     celula = str(df_rodape.iloc[l, c])
@@ -247,7 +311,7 @@ def processar_informacoes(texto_bruto, caminho_arquivo):
                 pos_projeto = texto_linha.find("PROJETO")
                 nums_encontrados = list(re.finditer(r"\b\d{8,12}\b", texto_linha))
                 
-                codigo_tabela = itens_pedido[0]['descricao'] if itens_pedido else ""
+                codigo_tabela = itens_pedido[0]['projeto'] if itens_pedido else ""
                 
                 for match in nums_encontrados:
                     num = match.group()
@@ -266,35 +330,76 @@ def processar_informacoes(texto_bruto, caminho_arquivo):
                     break 
 
             print(f"\n--- DEBUG LUCY ---")
-            print(f"🗺️  Região encontrada: {v_regiao} (Linha {linha_regiao})")
             print(f"📃 Contrato Identificado: {contrato_final}")
 
     except Exception as e:
-        print(f"⚠️ Erro ao processar vizinhança: {e}")
+        print(f"⚠️  Erro ao processar vizinhança: {e}")
 
     # Montagem final do Json, juntando tudo numa lista com dicionários
     dados_finais = {
         "cabecalho": {
+            "razao_social": v_razao,
             "numero_pr": v_pr,
-            "data": v_data,
+            "data": data_pedido_db,
             "cnpj": v_cnpj,
-            "ie": v_ie,
-            "endereco": v_end
+            "ie": v_ie  
         },
+        "endereco": [
+            {
+                "logradouro": logradouro,
+                "numero_endereco": numero_end,
+                "bairro": "",
+                "cep": cep
+            }
+        ],
         "itens_pedido": itens_pedido,
         "informacoes": {
-            "contrato": contrato_final,
-            "regiao": v_regiao
+            "contrato": contrato_final
         }
     }
     return dados_finais
+
+# -------------------------------
+# *******************************
+# -------------------------------
+  
+# Função responsável por entrar em contato com  API e passar os parâmetros para a inclusão do DB
+def comunicar_API(dados_json):
     
+    if not url_api:
+        print("⚠️ Erro: URL da API não configurada no .env")
+        return False
+
+    try:
+        # Enviamos o JSON via POST
+        # timeout=15 significa que se a API não responder em 15s, a Lucy desiste e segue o baile
+        
+        resposta = requests.post(url_api, json=dados_json, timeout=15)
+
+        # O status_code 200 ou 201 significam "Sucesso" para o envio
+        if resposta.status_code in [200, 201]:
+            print(f"🌐 Dados enviados para API com sucesso - (Status: {resposta.status_code})")
+            return True
+        else:
+            print(f"❌ Falha no envio para API - Erro: {resposta.status_code}")
+            print(f"🔍 Detalhes do servidor: {resposta.text}") # Ajuda muito no debug
+            return False
+
+    except requests.exceptions.RequestException as e:
+        # Captura erros de rede (ex: cabo desconectado, servidor offline)
+        print(f"📡 Erro de conexão com API: {e}")
+        return False
+
+# -------------------------------
+# *******************************
+# -------------------------------
+
 # Função responsável por pegar a hora atual do sistema, vai ajudar nas exibições, pega somente as horas e os minutos
 def get_hora_atual() -> str:
     return datetime.now().strftime("%H:%M")
 
 # --------------------------------------------------------------------------------------------------------------------
-# ********************************************************************************************************************
+# A FUNÇÃO MAIN PRINCIPAL DO PROJETO, RESPONSÁVEL POR CHAMAR AS OUTRAS E CONDUZIR TUDO
 # --------------------------------------------------------------------------------------------------------------------
 
 # O corpo do projeto, vai ser responsável por iniciar as funções, a primeiro momento é um loop while infinito, mas pode mudar
@@ -355,10 +460,15 @@ def main():
                     if texto_pdf:
                         dados_extraidos = processar_informacoes(texto_pdf, caminho_completo)
                         
+                        # envio_sucesso = comunicar_API(dados_extraidos)
+                        
                         # Lógica para o nome do arquivo JSON: PR + Data (limpa para o formato que o Windows aceita)
                         pr_limpo = dados_extraidos["cabecalho"]["numero_pr"].replace("/", "-")
                         data_limpa = dados_extraidos["cabecalho"]["data"].replace("/", "-")
-                        nome_json = f"PR_{pr_limpo}_{data_limpa}.json"
+                        
+                        # Caso por alguma razão ele não consiga o PR, ele deixa o nome original para não travar quando salvar
+                        pr_valido = pr_limpo if "Não" not in pr_limpo else nome_arquivo.replace(".pdf", "")
+                        nome_json = f"PR_{pr_valido}_{data_limpa}.json"
                         
                         caminho_salvamento = Path(pasta_json) / nome_json
                         os.makedirs(pasta_json, exist_ok=True)
@@ -372,7 +482,7 @@ def main():
                         with open(arquivo_memoria, "a") as f:
                             f.write(nome_arquivo + "\n")
                         
-                        print(f"📸 {nome_arquivo} processado e registrado na memória")
+                        print(f"📸 '{nome_arquivo}' processado e registrado no log")
                         print(f"✅ Dados de {nome_arquivo} salvos como {nome_json}")
                         print(("-" * 70) + "\n")
             
@@ -390,5 +500,7 @@ def main():
 
         time.sleep(5)
 
+# O 'if __name__' garante que o robô só comece a rodar se este arquivo for executado diretamente
+# isso evita que o loop infinito da Lucy ligue sozinho caso as funções sejam importadas em outro arquivo
 if __name__ == "__main__":
     main()
