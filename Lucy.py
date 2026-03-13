@@ -118,6 +118,9 @@ def extrair_tabela_com_camelot(caminho_arquivo, reidi_prioritario):
                     if not v_item.isdigit():
                         continue
                     
+                    # Convertendo o valor do Item para um valor Int para poder ser lido pela API, verifica novamente se é digito
+                    v_item_int = int(v_item) if v_item.isdigit() else 0
+                    
                     # Capturando o RAIDI usando a lógica de verificação de dois fatores
                     # Pegamos a opinião da tabela (Trava de segurança)
                     reidi_tabela = "NÃO"
@@ -153,10 +156,10 @@ def extrair_tabela_com_camelot(caminho_arquivo, reidi_prioritario):
                         data_remessa_db = v_data_re_limpa # Fallback caso falhe, voltando pra versão anterior as mudanças
                       
                     # Buscando pela descrição utilizando uma sub-função
-                    def obter_desc_real(linha_atual, idx_base):
+                    def obter_desc_real(linha_atual, coluna_base):
                         
                         # Candidatos: a coluna alvo, a anterior e a próxima
-                        indices_para_testar = [idx_base, idx_base - 1, idx_base + 1]
+                        indices_para_testar = [coluna_base, coluna_base - 1, coluna_base + 1]
                         
                         for idx in indices_para_testar:
                             
@@ -198,7 +201,7 @@ def extrair_tabela_com_camelot(caminho_arquivo, reidi_prioritario):
                         is_reidi = False  # Atribui o valor Booleano Falso
 
                     itens_pedido.append({
-                        "item": v_item,
+                        "item": v_item_int,
                         "data_remessa": data_remessa_db,
                         "projeto": projeto_final,
                         "valor_total": v_valor_limpo,
@@ -352,11 +355,17 @@ def processar_informacoes(texto_bruto, caminho_arquivo):
                 "cep": cep
             }
         ],
-        "itens_pedido": itens_pedido,
+        "itens_pedido": itens_pedido, # Passando a variável que guarda o resultado da função que usa o Camelot nas tabelas
         "informacoes": {
-            "contrato": contrato_final
+            "contrato": contrato_final,
+            
+            # Para o caminho eu pego ele dos parâmetros da função, o normapath padroniza o caminho para o SO
+            # a abspath garante o caminho completo, uma nota importante é que no JSON as barras virão duplicadas mas
+            # ao serem enviadas para API elas estarão normais, o python coloca as barras para dizer que não é um comando especial
+            "caminho_pdf": os.path.normpath(os.path.abspath(caminho_arquivo))
         }
     }
+    
     return dados_finais
 
 # -------------------------------
@@ -371,23 +380,25 @@ def comunicar_API(dados_json):
         return False
 
     try:
-        # Enviamos o JSON via POST
+        # Enviamos o json via POST
         # timeout=15 significa que se a API não responder em 15s, a Lucy desiste e segue o baile
         
+        # Estamos passando o dado do JSON montado para API
         resposta = requests.post(url_api, json=dados_json, timeout=15)
 
         # O status_code 200 ou 201 significam "Sucesso" para o envio
         if resposta.status_code in [200, 201]:
-            print(f"🌐 Dados enviados para API com sucesso - (Status: {resposta.status_code})")
+            print(f"🌐 Dados enviados para a API com sucesso - (Status: {resposta.status_code})")
             return True
         else:
-            print(f"❌ Falha no envio para API - Erro: {resposta.status_code}")
+            print(f"❌ Falha no envio para a API - Erro: {resposta.status_code}")
             print(f"🔍 Detalhes do servidor: {resposta.text}") # Ajuda muito no debug
             return False
 
     except requests.exceptions.RequestException as e:
+        
         # Captura erros de rede (ex: cabo desconectado, servidor offline)
-        print(f"📡 Erro de conexão com API: {e}")
+        print(f"📡 Erro de conexão com a API: {e}")
         return False
 
 # -------------------------------
@@ -445,7 +456,7 @@ def main():
                 data_modificacao = datetime.fromtimestamp(mtime)
 
                 if data_modificacao < data_corte:
-                    # Se for antigo, ignoramos silenciosamente
+                    # Se for antigo, ignoramos silenciosamente conforme especificado na definição da data de corte
                     continue
                 
                 # Condicional para processamento dos arquivos válidos
@@ -458,37 +469,46 @@ def main():
                     texto_pdf = extrair_texto_do_pdf(caminho_completo)
                     
                     if texto_pdf:
+                        
+                        # Importante lembrar que a processar_informacoes já invoca a que extrai dados da tabela via Camelot
                         dados_extraidos = processar_informacoes(texto_pdf, caminho_completo)
                         
-                        # envio_sucesso = comunicar_API(dados_extraidos)
+                        # Chamando a API e passando os parâmetros coletados e com tudo montado
+                        # Aqui vamos verificar se deu certo a comunicação com a API, se for True seguimos e senão ela nem continua
+                        # Lembrando que usar um IF assim basicamente verifica "IF tal coisa True"
+                        if comunicar_API(dados_extraidos):
                         
-                        # Lógica para o nome do arquivo JSON: PR + Data (limpa para o formato que o Windows aceita)
-                        pr_limpo = dados_extraidos["cabecalho"]["numero_pr"].replace("/", "-")
-                        data_limpa = dados_extraidos["cabecalho"]["data"].replace("/", "-")
-                        
-                        # Caso por alguma razão ele não consiga o PR, ele deixa o nome original para não travar quando salvar
-                        pr_valido = pr_limpo if "Não" not in pr_limpo else nome_arquivo.replace(".pdf", "")
-                        nome_json = f"PR_{pr_valido}_{data_limpa}.json"
-                        
-                        caminho_salvamento = Path(pasta_json) / nome_json
-                        os.makedirs(pasta_json, exist_ok=True)
-                        
-                        with open(caminho_salvamento, 'w', encoding='utf-8') as f:
-                            json.dump(dados_extraidos, f, ensure_ascii=False, indent=4)
-                        
-                        # Registrando na memória para nunca mais ler este arquivo
-                        # Nota importante, caso não exista o arquivo (numa primeira vez rodando por exemplo), ele cria ele por causa
-                        # do "a" de append, criei uma condicional lá em cima pois ele seria capaz de seguir o fluxo sem travar
-                        with open(arquivo_memoria, "a") as f:
-                            f.write(nome_arquivo + "\n")
-                        
-                        print(f"📸 '{nome_arquivo}' processado e registrado no log")
-                        print(f"✅ Dados de {nome_arquivo} salvos como {nome_json}")
-                        print(("-" * 70) + "\n")
+                                # Lógica para o nome do arquivo JSON: PR + Data (limpa para o formato que o Windows aceita)
+                                pr_limpo = dados_extraidos["cabecalho"]["numero_pr"].replace("/", "-")
+                                data_limpa = dados_extraidos["cabecalho"]["data"].replace("/", "-")
+                                
+                                # Caso por alguma razão ele não consiga o PR, ele deixa o nome original para não travar quando salvar
+                                pr_valido = pr_limpo if "Não" not in pr_limpo else nome_arquivo.replace(".pdf", "")
+                                nome_json = f"PR_{pr_valido}_{data_limpa}.json"
+                                
+                                caminho_salvamento = Path(pasta_json) / nome_json
+                                os.makedirs(pasta_json, exist_ok=True)
+                                
+                                with open(caminho_salvamento, 'w', encoding='utf-8') as f:
+                                    json.dump(dados_extraidos, f, ensure_ascii=False, indent=4)
+                                
+                                # Registrando na memória para nunca mais ler este arquivo
+                                # Nota importante, caso não exista o arquivo (numa primeira vez rodando por exemplo), ele cria ele por causa
+                                # do "a" de append, criei uma condicional lá em cima pois ele seria capaz de seguir o fluxo sem travar
+                                with open(arquivo_memoria, "a") as f:
+                                    f.write(nome_arquivo + "\n")
+                                
+                                print(f"📸 '{nome_arquivo}' processado e registrado no log")
+                                print(f"✅ Dados de {nome_arquivo} salvos como {nome_json}")
+                                
+                                print(f"\n🎉 {nome_arquivo} processado, enviado e registrado com sucesso")
+                                print(("-" * 70))
+                        else:
+                            print(f"⏳ {nome_arquivo} não foi enviado. Ele ficará pendente para a próxima tentativa (Não salvo)")
             
             # Com essa lógica ele só vai imprimir se não tiver nada e for a primeira busca ou se na última ele encontrou algo
             if not existem_arquivo and busca_arquivos:
-                print(f"🔕 Nenhum arquivo novo detectado após a data {data_corte.strftime('%d/%m/%Y')} - Aguardando novo arquivo na Pasta\n")
+                print(f"\n🔕 Nenhum arquivo novo detectado após a data {data_corte.strftime('%d/%m/%Y')} - Aguardando novo arquivo na Pasta\n")
                 busca_arquivos = False
             
             # Se novos arquivos forem encontrados o aviso é resetado para que possa avisar novamente
