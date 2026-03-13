@@ -338,35 +338,28 @@ def processar_informacoes(texto_bruto, caminho_arquivo):
     except Exception as e:
         print(f"⚠️  Erro ao processar vizinhança: {e}")
 
-    # Montagem final do Json, juntando tudo numa lista com dicionários
+    # Montagem final do Json, por causa da API é necessário fazer a montagem no modo payload plano
     dados_finais = {
-        "cabecalho": {
             "razao_social": v_razao,
             "numero_pr": v_pr,
             "data": data_pedido_db,
             "cnpj": v_cnpj,
-            "ie": v_ie  
-        },
-        "endereco": [
-            {
-                "logradouro": logradouro,
-                "numero_endereco": numero_end,
-                "bairro": "",
-                "cep": cep
-            }
-        ],
-        "itens_pedido": itens_pedido, # Passando a variável que guarda o resultado da função que usa o Camelot nas tabelas
-        "informacoes": {
+            "ie": v_ie,
+            "endereco": end_bruto,
+            "logradouro": logradouro,
+            "numero_endereco": numero_end,
+            "bairro": "",
+            "cep": cep,
             "contrato": contrato_final,
             
             # Para o caminho eu pego ele dos parâmetros da função, o normapath padroniza o caminho para o SO
             # a abspath garante o caminho completo, uma nota importante é que no JSON as barras virão duplicadas mas
             # ao serem enviadas para API elas estarão normais, o python coloca as barras para dizer que não é um comando especial
             "caminho_pdf": os.path.normpath(os.path.abspath(caminho_arquivo))
-        }
     }
     
-    return dados_finais
+    # Estamos retornando os dados base e a lista de itens separadamente
+    return dados_finais, itens_pedido
 
 # -------------------------------
 # *******************************
@@ -470,41 +463,56 @@ def main():
                     
                     if texto_pdf:
                         
-                        # Importante lembrar que a processar_informacoes já invoca a que extrai dados da tabela via Camelot
-                        dados_extraidos = processar_informacoes(texto_pdf, caminho_completo)
+                       # Agora recebemos a tupla: (dados_base, lista_de_itens)
+                        dados_base, lista_de_itens = processar_informacoes(texto_pdf, caminho_completo)
                         
-                        # Chamando a API e passando os parâmetros coletados e com tudo montado
-                        # Aqui vamos verificar se deu certo a comunicação com a API, se for True seguimos e senão ela nem continua
-                        # usar um IF assim basicamente verifica "IF tal coisa True", ele chama a função e pega o resultado
-                        if comunicar_API(dados_extraidos):
+                        sucesso_envio_arquivo = True
                         
-                                # Lógica para o nome do arquivo JSON: PR + Data (limpa para o formato que o Windows aceita)
-                                pr_limpo = dados_extraidos["cabecalho"]["numero_pr"].replace("/", "-")
-                                data_limpa = dados_extraidos["cabecalho"]["data"].replace("/", "-")
+                        # Loop para disparar cada item individualmente para a API, para evitar erro caso ela não aceite todos
+                        for item_tabela in lista_de_itens:
+                            
+                            # Criamos o payload plano: copia a base e 'cola' o item em cima
+                            payload = dados_base.copy()
+                            payload.update(item_tabela) # Aqui juntamos os dois, desse modo tudo é montado num pacote único
+                            # Por causa do loop For, a cada iteração ele vai adicionar um dos itens da tabela, garantindo que
+                            # todos serão de fato enviados, mesmo que existam vários itens numa tabela do PDF
+                            
+                            # Chamando a API usando o .ok e esperamos o resultado
+                            if not comunicar_API(payload):
                                 
-                                # Caso por alguma razão ele não consiga o PR, ele deixa o nome original para não travar quando salvar
-                                pr_valido = pr_limpo if "Não" not in pr_limpo else nome_arquivo.replace(".pdf", "")
-                                nome_json = f"PR_{pr_valido}_{data_limpa}.json"
+                                sucesso_envio_arquivo = False
+                                break # Se um item falhar, paramos este PDF para tentar tudo de novo depois
+                        
+                        # Se todos os itens do PDF foram enviados com sucesso
+                        if sucesso_envio_arquivo:
+                            
+                            # Lógica para o nome do arquivo JSON (usando dados_base para o nome)
+                            pr_limpo = dados_base["numero_pr"].replace("/", "-")
+                            data_limpa = dados_base["data"].replace("/", "-")
+                            
+                            pr_valido = pr_limpo if "Não" not in pr_limpo else nome_arquivo.replace(".pdf", "")
+                            nome_json = f"PR_{pr_valido}_{data_limpa}.json"
+                            
+                            caminho_salvamento = Path(pasta_json) / nome_json
+                            os.makedirs(pasta_json, exist_ok=True)
+                            
+                            # Salvando o JSON local completo com a lista
+                            with open(caminho_salvamento, 'w', encoding='utf-8') as f:
                                 
-                                caminho_salvamento = Path(pasta_json) / nome_json
-                                os.makedirs(pasta_json, exist_ok=True)
-                                
-                                with open(caminho_salvamento, 'w', encoding='utf-8') as f:
-                                    json.dump(dados_extraidos, f, ensure_ascii=False, indent=4)
-                                
-                                # Registrando na memória para nunca mais ler este arquivo
-                                # Nota importante, caso não exista o arquivo (numa primeira vez rodando por exemplo), ele cria ele por causa
-                                # do "a" de append, criei uma condicional lá em cima pois ele seria capaz de seguir o fluxo sem travar
-                                with open(arquivo_memoria, "a") as f:
-                                    f.write(nome_arquivo + "\n")
-                                
-                                print(f"📸 '{nome_arquivo}' processado e registrado no log")
-                                print(f"✅ Dados de {nome_arquivo} salvos como {nome_json}")
-                                
-                                print(f"\n🎉 '{nome_arquivo}' processado, enviado e registrado com sucesso")
-                                print(("-" * 70 + "\n"))
+                                # Aqui salvamos a estrutura completa (base + todos os itens) para o registro de log
+                                log_local = dados_base.copy()
+                                log_local["itens_completos"] = lista_de_itens
+                                json.dump(log_local, f, ensure_ascii=False, indent=4)
+                            
+                            # Registrando na memória (Log TXT)
+                            with open(arquivo_memoria, "a") as f:
+                                f.write(nome_arquivo + "\n")
+                            
+                            print(f"📸 '{nome_arquivo}' ({len(lista_de_itens)} itens) processado e registrado.")
+                            print(f"✅ Backup salvo como {nome_json}")
+                            print("-" * 70 + "\n")
                         else:
-                            print(f"⏳ {nome_arquivo} não foi enviado. Ele ficará pendente para a próxima tentativa (Não salvo)")
+                            print(f"⏳ '{nome_arquivo}' teve falha no envio de itens. Pendente para nova tentativa (Não registrado)\n")
             
             # Com essa lógica ele só vai imprimir se não tiver nada e for a primeira busca ou se na última ele encontrou algo
             if not existem_arquivo and busca_arquivos:
