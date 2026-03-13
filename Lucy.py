@@ -371,7 +371,7 @@ def processar_informacoes(texto_bruto, caminho_arquivo):
 # -------------------------------
 # *******************************
 # -------------------------------
-  
+
 # Função responsável por entrar em contato com  API e passar os parâmetros para a inclusão do DB
 def comunicar_API(dados_json):
     
@@ -386,8 +386,8 @@ def comunicar_API(dados_json):
         # Estamos passando o dado do JSON montado para API
         resposta = requests.post(url_api, json=dados_json, timeout=15)
 
-        # O status_code 200 ou 201 significam "Sucesso" para o envio
-        if resposta.status_code in [200, 201]:
+        # O 'ok' é um meio de saber se deu certo o envio para a API, poderia ser [200, 201] tbm
+        if resposta.ok:
             print(f"🌐 Dados enviados para a API com sucesso - (Status: {resposta.status_code})")
             return True
         else:
@@ -501,14 +501,14 @@ def main():
                                 print(f"📸 '{nome_arquivo}' processado e registrado no log")
                                 print(f"✅ Dados de {nome_arquivo} salvos como {nome_json}")
                                 
-                                print(f"\n🎉 {nome_arquivo} processado, enviado e registrado com sucesso")
-                                print(("-" * 70))
+                                print(f"\n🎉 '{nome_arquivo}' processado, enviado e registrado com sucesso")
+                                print(("-" * 70 + "\n"))
                         else:
                             print(f"⏳ {nome_arquivo} não foi enviado. Ele ficará pendente para a próxima tentativa (Não salvo)")
             
             # Com essa lógica ele só vai imprimir se não tiver nada e for a primeira busca ou se na última ele encontrou algo
             if not existem_arquivo and busca_arquivos:
-                print(f"\n🔕 Nenhum arquivo novo detectado após a data {data_corte.strftime('%d/%m/%Y')} - Aguardando novo arquivo na Pasta\n")
+                print(f"🔕 Nenhum arquivo novo detectado após a data {data_corte.strftime('%d/%m/%Y')} - Aguardando novo arquivo na Pasta\n")
                 busca_arquivos = False
             
             # Se novos arquivos forem encontrados o aviso é resetado para que possa avisar novamente
