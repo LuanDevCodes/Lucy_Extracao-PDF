@@ -53,5 +53,4 @@ ANO_CORTE=2026
 ```
 ---
 
-Trabalhar nesse projeto de automação e em outros que tive a oportunidade de desenvolver foram muito importantes pra fixação de conteúdo e comnpreensão da capacidade do Python em extração, manipulação, padronização e envio de dados.
-
+Nota pessoal: Trabalhar nesse projeto de automação e em outros que tive a oportunidade de desenvolver foi muito importante pra fixação de conteúdo e compreensão da capacidade do Python em extração, manipulação, padronização e envio de dados.
