@@ -475,7 +475,7 @@ def main():
                         
                         # Chamando a API e passando os parâmetros coletados e com tudo montado
                         # Aqui vamos verificar se deu certo a comunicação com a API, se for True seguimos e senão ela nem continua
-                        # Lembrando que usar um IF assim basicamente verifica "IF tal coisa True"
+                        # usar um IF assim basicamente verifica "IF tal coisa True", ele chama a função e pega o resultado
                         if comunicar_API(dados_extraidos):
                         
                                 # Lógica para o nome do arquivo JSON: PR + Data (limpa para o formato que o Windows aceita)
