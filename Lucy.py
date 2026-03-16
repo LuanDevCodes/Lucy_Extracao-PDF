@@ -23,14 +23,6 @@ pasta_pdf = os.getenv("PASTA_PDF")
 pasta_json = os.getenv("PASTA_JSON")
 url_api = os.getenv("URL_API")
 
-# Data de corte: ela só processará arquivos modificados após esta data, separei no formato Br pra ficar mais fácil e legível
-d = int(os.getenv("DIA_CORTE"))
-m = int(os.getenv("MES_CORTE"))
-a = int(os.getenv("ANO_CORTE"))
-
-# invertendo internamente para o padrão do Python, deixei assim por gosto pessoal, mas não é algo crucial ao projeto
-data_corte = datetime(a, m, d)
-
 # --------------------------------------------------------------------------------------------------------------------
 # ORGANIZANDO AS FUNÇÕES PRINCIPAIS DO PROJETO
 # --------------------------------------------------------------------------------------------------------------------
@@ -403,185 +395,65 @@ def get_hora_atual() -> str:
     return datetime.now().strftime("%H:%M")
 
 # --------------------------------------------------------------------------------------------------------------------
-# A FUNÇÃO MAIN PRINCIPAL DO PROJETO, RESPONSÁVEL POR CHAMAR AS OUTRAS E CONDUZIR TUDO
+# A FUNÇÃO MAIN DO PROJETO - AGORA ELA É RESPONSÁVEL POR REALIZAR A EXTRAÇÃO E ENVIAR PRO DB DIRETO
 # --------------------------------------------------------------------------------------------------------------------
 
-# O corpo do projeto, vai ser responsável por iniciar as funções, a primeiro momento é um loop while infinito, mas pode mudar
-# Dependendo dos próximos passos do projeto
 def main():
     print(f"\n🪆  Lucy iniciando seus serviços - {get_hora_atual()}")
-    print(f"📅 Filtro ativo: Processando arquivos modificados após {data_corte.strftime('%d/%m/%Y')}\n")
     
-    # Pra contar as falhas e eventualmente pausar o código
-    tentativas_falhas = {}
-    
-    # Caminho do arquivo que servirá de memória para a Lucy
-    arquivo_memoria = Path(pasta_json) / "pdfs_processados.log"
-    
-    # Caso o arquivo de log não exista a primeiro momento, ele é criado, se ele existir ele apenas atualiza a data de acesso
-    # mas não chega a apagar nada
-    if not arquivo_memoria.exists():
-        arquivo_memoria.touch() # O comando .touch() cria o arquivo em branco, vem do Linux :D
-        print(f"📁 Arquivo de log criado em: {arquivo_memoria}")
+    try:
+        if not os.path.exists(pasta_pdf):
+            print(f"⚠️ Pasta de PDF não encontrada: {pasta_pdf}")
+            return 
+
+        # Pegamos todos os arquivos .pdf da pasta
+        arquivos = [os.path.join(pasta_pdf, f) for f in os.listdir(pasta_pdf) if f.endswith('.pdf')]
         
-    busca_arquivos = True # É a variável para controle do aviso de arquivos encontrados
-    
-    while True:
-        try:
-            if not os.path.exists(pasta_pdf):
-                print(f"⚠️ Pasta de PDF não encontrada: {pasta_pdf}")
-                time.sleep(10)
-                continue
-            
-            # Carregando a memória do arquivo para não reprocessar
-            with open(arquivo_memoria, "r") as f:
-                processados = set(f.read().splitlines())
+        if not arquivos:
+            print("🔕 Nenhum arquivo PDF encontrado para processar")
+            return
 
-            arquivos = os.listdir(pasta_pdf)
-            existem_arquivo= False # Variável para controle de arquivos atuais, com isso saberemos se ela não leu nenhum
-            
-            for nome_arquivo in arquivos:
-                
-                if not nome_arquivo.endswith('.pdf') or nome_arquivo in processados:
-                    continue
-                
-                caminho_completo = os.path.join(pasta_pdf, nome_arquivo)
-                
-                # Pega a data de modificação do arquivo no Windows
-                mtime = os.path.getmtime(caminho_completo)
-                data_modificacao = datetime.fromtimestamp(mtime)
+        # Ordenando os arquivos pela data de modificação e pegamos o último (o mais novo)
+        arquivo_mais_recente = max(arquivos, key=os.path.getmtime)
+        nome_arquivo = os.path.basename(arquivo_mais_recente)
+        
+        print("-" * 70)
+        print(f"📍 Alvo identificado: {nome_arquivo}")
 
-                if data_modificacao < data_corte:
-                    # Se for antigo, ignoramos silenciosamente conforme especificado na definição da data de corte
-                    continue
-                
-                # Se o arquivo está na lista de arquivos falhos número de tentativas maior ou igual a 3, tentamos outro envio
-                if tentativas_falhas.get(nome_arquivo, 0) >= 3:
-                    continue
-                
-                # Condicional para processamento dos arquivos válidos
-                if data_modificacao >= data_corte:
-                    existem_arquivo = True # Se a data de modificação for maior ou igual a de corte, então ele existe e é válido
-                
-                    print("-" * 70)
-                    print(f"📍 Detectado: {nome_arquivo}")
-
-                    texto_pdf = extrair_texto_do_pdf(caminho_completo)
-                    
-                    if texto_pdf:
-                        
-                       # Agora recebemos a tupla: (dados_base, lista_de_itens)
-                        dados_base, lista_de_itens = processar_informacoes(texto_pdf, caminho_completo)
-                        
-                        sucesso_envio_arquivo = True
-                        
-                        # Loop para disparar cada item individualmente para a API, para evitar erro caso ela não aceite todos
-                        for item_tabela in lista_de_itens:
-                            
-                            # Criamos o payload plano: copia a base e 'cola' o item em cima
-                            payload = dados_base.copy()
-                            payload.update(item_tabela) # Aqui juntamos os dois, desse modo tudo é montado num pacote único
-                            # Por causa do loop For, a cada iteração ele vai adicionar um dos itens da tabela, garantindo que
-                            # todos serão de fato enviados, mesmo que existam vários itens numa tabela do PDF
-                            
-                            # Chamando a API usando o .ok e esperamos o resultado
-                            if not comunicar_API(payload):
-                                
-                                # Se ele entrou aqui, adicionamos ele no dicionário para controlar os GAP's e adiciono 1 a falha
-                                tentativas_falhas[nome_arquivo] = tentativas_falhas.get(nome_arquivo, 0) + 1
-                                quantidade_erros = tentativas_falhas[nome_arquivo]
-                                
-                                # Criei esse contador de gap pra caso ele não consiga enviar os arquivos que deram erro
-                                # ele não fique rodando indefinidamente antes de tentar novamente, aqui ele tem uma pausa
-                                # de mais ou nmenos 20 minutos caso ele percorra a lista de itens e todos estejam em quarentena
-                                print(f"\n👽 Falha no envio identificada - Iniciando protocolo GAP - Tentativas: {quantidade_erros}/3")
-                                
-                                if quantidade_erros >= 3:
-                                    print(f"🌌 Limite de tentativas alcançado, o arquivo entrou em quarentena, tentando outro\n")
-                                    
-                                sucesso_envio_arquivo = False
-                                break # Se um item falhar, paramos este PDF para tentar tudo de novo depois
-                        
-                        # Se todos os itens do PDF foram enviados com sucesso
-                        if sucesso_envio_arquivo:
-                            
-                            # Lógica para o nome do arquivo JSON (usando dados_base para o nome)
-                            pr_limpo = dados_base["numero_pr"].replace("/", "-")
-                            data_limpa = dados_base["data"].replace("/", "-")
-                            
-                            pr_valido = pr_limpo if "Não" not in pr_limpo else nome_arquivo.replace(".pdf", "")
-                            nome_json = f"PR_{pr_valido}_{data_limpa}.json"
-                            
-                            caminho_salvamento = Path(pasta_json) / nome_json
-                            os.makedirs(pasta_json, exist_ok=True)
-                            
-                            # Salvando o JSON local completo com a lista
-                            with open(caminho_salvamento, 'w', encoding='utf-8') as f:
-                                
-                                # Aqui salvamos a estrutura completa (base + todos os itens) para o registro de log
-                                log_local = dados_base.copy()
-                                log_local["itens_completos"] = lista_de_itens
-                                json.dump(log_local, f, ensure_ascii=False, indent=4)
-                            
-                            # Registrando na memória (Log TXT)
-                            with open(arquivo_memoria, "a") as f:
-                                f.write(nome_arquivo + "\n")
-                            
-                            print(f"📸 '{nome_arquivo}' ({len(lista_de_itens)} itens) processado e registrado.")
-                            print(f"✅ Backup salvo como {nome_json}")
-                            
-                            # Caso ele tenha conseguido ser enviado ele é apagado da lista de quarentena, independente da tentat.
-                            if nome_arquivo in tentativas_falhas:
-                                del tentativas_falhas[nome_arquivo]
-                            print("-" * 70 + "\n")
-                        else:
-                            print(f"⏳ '{nome_arquivo}' teve falha no envio de itens. Pendente para nova tentativa (Não registrado)")
+        texto_pdf = extrair_texto_do_pdf(arquivo_mais_recente)
+        
+        if texto_pdf:
             
-            # Verificamos se existem arquivos que atingiram o limite mas não posso me basear só nisso pq senão ele cria um loop
-            # infinito aonde o mesmo é sempre verificado, por isso uso outra lista
-            arquivos_na_quarentena = []
-            for arq, erros in tentativas_falhas.items():
-                if erros >= 3:
-                    arquivos_na_quarentena.append(arq)
+            # Extração dos dados base e da lista completa de itens
+            dados_base, lista_de_itens = processar_informacoes(texto_pdf, arquivo_mais_recente)
             
-            tem_pdf_valido_na_pasta = False
-            arquivos_pendentes = []
+            print(f"📦 Extraídos {len(lista_de_itens)} itens da tabela. Iniciando registros...")
 
-            for f in arquivos:
-                if f.endswith('.pdf') and f not in processados:
-                   
-                    # Precisamos checar a data aqui também para o censo ser real
-                    caminho = os.path.join(pasta_pdf, f)
-                    mtime = os.path.getmtime(caminho)
-                    dt_mod = datetime.fromtimestamp(mtime)
-                    
-                    if dt_mod >= data_corte:
-                        tem_pdf_valido_na_pasta = True # Assim encontramos um PDF que ela deve fazer, com data de corte aplicada
-                        
-                        if f not in arquivos_na_quarentena:
-                            arquivos_pendentes.append(f)
-
-            if arquivos_na_quarentena and not arquivos_pendentes:
-                print("-" * 70)
-                print(f"✴️  Protocolo GAP: Todos os arquivos pendentes estão em quarentena ({len(arquivos_na_quarentena)} arquivos)")
-                print("💤 Iniciando pausa de 20 minutos para resfriamento...")
-                time.sleep(1200)
-                tentativas_falhas.clear()
-                print("❇️  Ficha limpa! Reiniciando varredura")
-                print("-" * 70 + "\n")
-                busca_arquivos = True
+            itens_sucesso = 0
+            
+            # Registrando item por item
+            # Aqui ela percorre a tabela e entrega cada linha individualmente
+            for item_tabela in lista_de_itens:
+                payload = dados_base.copy()
+                payload.update(item_tabela)
                 
-            elif not tem_pdf_valido_na_pasta and busca_arquivos:
-                print(f"🔕 Nenhum arquivo novo detectado após a data {data_corte.strftime('%d/%m/%Y')} - Aguardando...")
-                busca_arquivos = False
-                time.sleep(5)
-            
+                # Por enquanto mantemos o envio para a API que você já tem
+                # Logo abaixo adicionaremos a função que insere direto no DB SQL
+                if comunicar_API(payload):
+                    itens_sucesso = itens_sucesso + 1
+                else:
+                    print(f"❌ Falha ao registrar item {item_tabela['item']}.")
+
+            # Print final de resumo do arquivo (fora do loop dos itens)
+            if itens_sucesso == len(lista_de_itens):
+                print(f"📸 Todos os {len(lista_de_itens)} itens de '{nome_arquivo}' foram registrados")
             else:
-                # Se ainda tem arquivo saudável ou se a pasta tem PDF mas busca_arquivos é False
-                time.sleep(5)
-            
-        except Exception as e:
-            print(f"⚠️  Erro na vigilância: {e}")
+                print(f"⚠️ Atenção: Apenas {itens_sucesso}/{len(lista_de_itens)} itens foram registrados")
+
+    except Exception as e:
+        print(f"⚠️  Erro durante a extração: {e}")
+
+    print(f"\n💤  Lucy encerrando suas atividades - {get_hora_atual()}")
 
 # O 'if __name__' garante que o robô só comece a rodar se este arquivo for executado diretamente
 # isso evita que o loop infinito da Lucy ligue sozinho caso as funções sejam importadas em outro arquivo
