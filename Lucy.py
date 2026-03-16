@@ -412,6 +412,9 @@ def main():
     print(f"\n🪆  Lucy iniciando seus serviços - {get_hora_atual()}")
     print(f"📅 Filtro ativo: Processando arquivos modificados após {data_corte.strftime('%d/%m/%Y')}\n")
     
+    # Pra contar as falhas e eventualmente pausar o código
+    tentativas_falhas = {}
+    
     # Caminho do arquivo que servirá de memória para a Lucy
     arquivo_memoria = Path(pasta_json) / "pdfs_processados.log"
     
@@ -452,6 +455,10 @@ def main():
                     # Se for antigo, ignoramos silenciosamente conforme especificado na definição da data de corte
                     continue
                 
+                # Se o arquivo está na lista de arquivos falhos número de tentativas maior ou igual a 3, tentamos outro envio
+                if tentativas_falhas.get(nome_arquivo, 0) >= 3:
+                    continue
+                
                 # Condicional para processamento dos arquivos válidos
                 if data_modificacao >= data_corte:
                     existem_arquivo = True # Se a data de modificação for maior ou igual a de corte, então ele existe e é válido
@@ -480,6 +487,18 @@ def main():
                             # Chamando a API usando o .ok e esperamos o resultado
                             if not comunicar_API(payload):
                                 
+                                # Se ele entrou aqui, adicionamos ele no dicionário para controlar os GAP's e adiciono 1 a falha
+                                tentativas_falhas[nome_arquivo] = tentativas_falhas.get(nome_arquivo, 0) + 1
+                                quantidade_erros = tentativas_falhas[nome_arquivo]
+                                
+                                # Criei esse contador de gap pra caso ele não consiga enviar os arquivos que deram erro
+                                # ele não fique rodando indefinidamente antes de tentar novamente, aqui ele tem uma pausa
+                                # de mais ou nmenos 20 minutos caso ele percorra a lista de itens e todos estejam em quarentena
+                                print(f"\n👽 Falha no envio identificada - Iniciando protocolo GAP - Tentativas: {quantidade_erros}/3")
+                                
+                                if quantidade_erros >= 3:
+                                    print(f"🌌 Limite de tentativas alcançado, o arquivo entrou em quarentena, tentando outro\n")
+                                    
                                 sucesso_envio_arquivo = False
                                 break # Se um item falhar, paramos este PDF para tentar tudo de novo depois
                         
@@ -510,23 +529,59 @@ def main():
                             
                             print(f"📸 '{nome_arquivo}' ({len(lista_de_itens)} itens) processado e registrado.")
                             print(f"✅ Backup salvo como {nome_json}")
+                            
+                            # Caso ele tenha conseguido ser enviado ele é apagado da lista de quarentena, independente da tentat.
+                            if nome_arquivo in tentativas_falhas:
+                                del tentativas_falhas[nome_arquivo]
                             print("-" * 70 + "\n")
                         else:
-                            print(f"⏳ '{nome_arquivo}' teve falha no envio de itens. Pendente para nova tentativa (Não registrado)\n")
+                            print(f"⏳ '{nome_arquivo}' teve falha no envio de itens. Pendente para nova tentativa (Não registrado)")
             
-            # Com essa lógica ele só vai imprimir se não tiver nada e for a primeira busca ou se na última ele encontrou algo
-            if not existem_arquivo and busca_arquivos:
-                print(f"🔕 Nenhum arquivo novo detectado após a data {data_corte.strftime('%d/%m/%Y')} - Aguardando novo arquivo na Pasta\n")
-                busca_arquivos = False
+            # Verificamos se existem arquivos que atingiram o limite mas não posso me basear só nisso pq senão ele cria um loop
+            # infinito aonde o mesmo é sempre verificado, por isso uso outra lista
+            arquivos_na_quarentena = []
+            for arq, erros in tentativas_falhas.items():
+                if erros >= 3:
+                    arquivos_na_quarentena.append(arq)
             
-            # Se novos arquivos forem encontrados o aviso é resetado para que possa avisar novamente
-            if existem_arquivo:
-                busca_arquivos = True
+            tem_pdf_valido_na_pasta = False
+            arquivos_pendentes = []
 
+            for f in arquivos:
+                if f.endswith('.pdf') and f not in processados:
+                   
+                    # Precisamos checar a data aqui também para o censo ser real
+                    caminho = os.path.join(pasta_pdf, f)
+                    mtime = os.path.getmtime(caminho)
+                    dt_mod = datetime.fromtimestamp(mtime)
+                    
+                    if dt_mod >= data_corte:
+                        tem_pdf_valido_na_pasta = True # Assim encontramos um PDF que ela deve fazer, com data de corte aplicada
+                        
+                        if f not in arquivos_na_quarentena:
+                            arquivos_pendentes.append(f)
+
+            if arquivos_na_quarentena and not arquivos_pendentes:
+                print("-" * 70)
+                print(f"✴️  Protocolo GAP: Todos os arquivos pendentes estão em quarentena ({len(arquivos_na_quarentena)} arquivos)")
+                print("💤 Iniciando pausa de 20 minutos para resfriamento...")
+                time.sleep(1200)
+                tentativas_falhas.clear()
+                print("❇️  Ficha limpa! Reiniciando varredura")
+                print("-" * 70 + "\n")
+                busca_arquivos = True
+                
+            elif not tem_pdf_valido_na_pasta and busca_arquivos:
+                print(f"🔕 Nenhum arquivo novo detectado após a data {data_corte.strftime('%d/%m/%Y')} - Aguardando...")
+                busca_arquivos = False
+                time.sleep(5)
+            
+            else:
+                # Se ainda tem arquivo saudável ou se a pasta tem PDF mas busca_arquivos é False
+                time.sleep(5)
+            
         except Exception as e:
             print(f"⚠️  Erro na vigilância: {e}")
-
-        time.sleep(5)
 
 # O 'if __name__' garante que o robô só comece a rodar se este arquivo for executado diretamente
 # isso evita que o loop infinito da Lucy ligue sozinho caso as funções sejam importadas em outro arquivo
