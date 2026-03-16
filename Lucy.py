@@ -1,14 +1,13 @@
 # Projeto Lucy - Extração de informação de relatórios PDF e criação de JSON
 
 # Bibliotecas usadas no projeto
-import time # Para algumas funções que utilizam horário, é do próprio python
 import os # Para poder conversar com o SO
 import json # Precisa dela para a geração dos arquivos JSON que serão o log do projeto
 import re # Vem de Regex, é especialista em padões, não procura palavras em si. É muito importante para capturar datas e números
 import camelot # Especializada em extrair informações de PDF's em coordenadas espaciais (x e Y), uso em conjunto com a pypdf
 import requests # Necessária para a comunicação direta com a API
 from pypdf import PdfReader # Para trabalharmos com os PDF's, descobri ao longo de testes que ela n é boa com tabelas
-from datetime import datetime, timedelta # O timedelta é para fazer as contas usando as horas, é bem útil
+from datetime import datetime # O datetime é necessário para situações aonde preciso da data e hora
 from pathlib import Path # Usada quando precisamos navegar por pastas de arquivos
 from dotenv import load_dotenv # Para carregar o arquivo .env, com ele eu consigo trancar tudo e deixar o repositório público :D
 
@@ -29,7 +28,9 @@ url_api = os.getenv("URL_API")
 
 # O código é dividido por funções especializadas, cada uma responsável por uma parte
 
-# ----------------------------------------------------------
+# -------------------------------
+# *******************************
+# -------------------------------
 
 # Função responsável por extrair todo o texto do PDF
 def extrair_texto_do_pdf(caminho_arquivo):
@@ -443,6 +444,28 @@ def main():
                     itens_sucesso = itens_sucesso + 1
                 else:
                     print(f"❌ Falha ao registrar item {item_tabela['item']}.")
+
+            if itens_sucesso > 0:
+                
+                # Criando o nome do arquivo baseado no PR e Data
+                pr_limpo = dados_base["numero_pr"].replace("/", "-")
+                data_limpa = dados_base["data"].replace("/", "-")
+                pr_valido = pr_limpo if "Não" not in pr_limpo else nome_arquivo.replace(".pdf", "")
+                nome_json = f"PR_{pr_valido}_{data_limpa}.json"
+                
+                caminho_salvamento = Path(pasta_json) / nome_json
+                
+                # Se a pasta não existir é realizado a criação dela
+                os.makedirs(pasta_json, exist_ok=True)
+                
+                with open(caminho_salvamento, 'w', encoding='utf-8') as f:
+                    
+                    # Criamos um log completo que junta os dados do cabeçalho com a lista de itens
+                    log_local = dados_base.copy()
+                    log_local["itens_completos"] = lista_de_itens
+                    json.dump(log_local, f, ensure_ascii=False, indent=4)
+                
+                print(f"✅ Backup local salvo em: {nome_json} - {caminho_salvamento}")
 
             # Print final de resumo do arquivo (fora do loop dos itens)
             if itens_sucesso == len(lista_de_itens):
