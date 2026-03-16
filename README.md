@@ -1,11 +1,14 @@
 # 🪆 Projeto Lucy - Extração de Dados de Relatórios PDF
 
-A **Lucy** é uma ferramenta de automação desenvolvida em Python para monitorar pastas, extrair informações de relatórios em formato PDF, converter esses dados em arquivos JSON estruturados (servem como log de registro) e realizar a comunicação com o banco de dados via API para inserção dos dados coletados
+A **Lucy** é uma ferramenta desenvolvida em Python para a extração automatizada de dados de relatórios em formato PDF. Originalmente surgiu como um serviço de monitoramento contínuo, ela agora é parte de um **módulo de infraestrutura** integrado via API, servindo como o motor de processamento para sistemas (C#/.NET).
 
-### 📝 Descrição do Funcionamento
-O projeto realiza uma varredura contínua em diretórios específicos em busca de novos arquivos PDF. Através de uma lógica de filtros, o sistema identifica apenas documentos modificados após uma determinada "data de corte" definida pelo usuário via variáveis de ambiente
+## 🚀 Arquitetura e Evolução
+Atualmente, a Lucy opera sob demanda (**On-Demand Execution**), funcionando como uma ferramenta invocada pelo sistema principal:
 
-Para garantir a integridade do processo, a Lucy utiliza um sistema de **Memória Persistente (Log)**, que registra cada arquivo processado com sucesso em um arquivo físico (`.log`), impedindo que o mesmo documento seja lido repetidamente, mesmo após o sistema ou a máquina serem reiniciados
+* **Invocação por Evento:** O sistema (C#) aciona o executável apenas quando necessário
+* **Seleção Inteligente:** Identifica automaticamente o arquivo mais recente na pasta de origem para processamento imediato
+* **Granularidade de Dados:** Processa o cabeçalho complexo e extrai cada item da tabela individualmente
+* **Integração Híbrida:** Envia os dados processados para uma API REST e gera simultaneamente um backup local em JSON para auditoria e refatoramento
 
 ---
 
@@ -20,37 +23,23 @@ Para garantir a integridade do processo, a Lucy utiliza um sistema de **Memória
 
 ---
 
-### 🔄 Ciclo de Processamento (Pipeline)
+## 📋 Fluxo de Funcionamento
+1.  **Trigger:** O usuário solicita o processamento via interface do sistema principal
+2.  **Scan:** A Lucy varre o diretório e seleciona o PDF com o registro de modificação mais recente
+3.  **Extraction:** O texto e as tabelas são processados; campos como Razão Social, CNPJ, Itens, Datas e Valores são mapeados via Regex e lógica de colunas
+4.  **Delivery:** Cada item extraído é disparado individualmente para o endpoint da API
+5.  **Logging:** Um arquivo JSON consolidado é gerado na pasta de destino, contendo o log completo da extração para conferência técnica
 
-Para garantir a eficiência e a integridade dos dados, a Lucy segue um fluxo lógico rigoroso em cada ciclo:
+### Variáveis de Ambiente (.env)
+* `PASTA_PDF`: Caminho dos relatórios de entrada
+* `PASTA_JSON`: Destino dos backups e logs de processamento
+* `URL_API`: Endpoint para integração dos dados
 
-1. **Monitoramento**: Varredura contínua do diretório configurado em busca de novos arquivos `.pdf`
-2. **Validação de Corte**: Comparação da data de modificação do arquivo com a data de corte do sistema
-3. **Consulta de Memória**: Verificação no arquivo de log para evitar reprocessamento, está ligado com o monitoramento dela, realizando a verificação mesmo que ela seja reiniciada
-4. **Extração Híbrida**: 
-    * Captura de texto bruto e metadados via `PyPDF`.
-    * Extração de tabelas complexas via `Camelot` (análise de coordenadas espaciais)
-5. **Normalização**: Tratamento de tipos de dados (Inteiros, Booleanos) e formatação de datas para o padrão ISO 8601 (`YYYY-MM-DD`), é importante para a comunicação com a API interna
-6. **Entrega Garantida**: Realiza o envio via `POST` para a API. O registro local e o log de sucesso **só são efetivados** após a confirmação (Status 200/201) do servidor de destino
+## 🛡️ Melhorias Implementadas
+* **Alta Performance:** Migração para o modo de diretório único, reduzindo o tempo de carregamento inicial (antes compilada num executável (onefile via pyinstaller)
+* **Resiliência:** Tratamento de erros por item, garantindo que falhas em linhas específicas da tabela não interrompam a extração do documento inteiro
+* **Feedback Visual:** Resumos de console formatados com emojis para facilitar o monitoramento em tempo real via Standard Output (stdout)
 
----
-
-### ⚙️ Configuração do Ambiente (.env)
-Este projeto utiliza variáveis de ambiente para segurança. Foi necessário criar um arquivo `.env` na raiz do projeto seguindo o modelo:
-
-```env
-# Caminhos de Diretórios
-PASTA_PDF=C:/caminho/para/seus/pdfs
-PASTA_JSON=C:/caminho/para/salvamento/json
-
-# Integração com Banco de Dados
-URL_API=http://sua-api-csharp.com/api/v1/pedidos
-
-# Filtro de Data de Corte (No formato Brasileiro)
-DIA_CORTE=01
-MES_CORTE=03
-ANO_CORTE=2026
-```
 ---
 
 Nota pessoal: Trabalhar nesse projeto de automação e em outros que tive a oportunidade de desenvolver foi muito importante pra fixação de conteúdo e compreensão da capacidade do Python em extração, manipulação, padronização e envio de dados.
