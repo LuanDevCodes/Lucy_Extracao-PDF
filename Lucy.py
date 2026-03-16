@@ -403,6 +403,7 @@ def main():
     print(f"\n🪆  Lucy iniciando seus serviços - {get_hora_atual()}")
     
     try:
+        
         if not os.path.exists(pasta_pdf):
             print(f"⚠️ Pasta de PDF não encontrada: {pasta_pdf}")
             return 
@@ -467,16 +468,17 @@ def main():
                 
                 print(f"✅ Backup local salvo em: {nome_json} - {caminho_salvamento}")
 
-            # Print final de resumo do arquivo (fora do loop dos itens)
+            # Print final de resumo do arquivo (fora do loop dos itens), garante no nome de todos os itens da lista (tabela)
             if itens_sucesso == len(lista_de_itens):
                 print(f"📸 Todos os {len(lista_de_itens)} itens de '{nome_arquivo}' foram registrados")
             else:
                 print(f"⚠️ Atenção: Apenas {itens_sucesso}/{len(lista_de_itens)} itens foram registrados")
-
+                
     except Exception as e:
         print(f"⚠️  Erro durante a extração: {e}")
-
+        
     print(f"\n💤  Lucy encerrando suas atividades - {get_hora_atual()}")
+    print("-" * 70)
 
 # O 'if __name__' garante que o robô só comece a rodar se este arquivo for executado diretamente
 # isso evita que o loop infinito da Lucy ligue sozinho caso as funções sejam importadas em outro arquivo
