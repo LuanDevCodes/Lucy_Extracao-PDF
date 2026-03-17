@@ -96,7 +96,7 @@ def extrair_tabela_com_camelot(caminho_arquivo, reidi_prioritario):
             caminho_arquivo, 
             pages='1', 
             flavor='stream',
-            edge_tol=500
+            edge_tol=500 # Aqui estou aumentando a sensibilidade dele as bordas das tabelas, ajuda a capturar tabelas comprimidas
         )
         
         # proteção 2: se a tentativa automática falhar (0 tabelas), tentamos com as coordenadas fixas criadas anteriormente
