@@ -83,157 +83,171 @@ def extrair_tabela_com_camelot(caminho_arquivo, reidi_prioritario):
     itens_pedido = []
     
     try:
-        # Definimos onde cada coluna 'nasce' no eixo X (da esquerda para a direita)
-        # Exemplo: Item começa em 50, Req em 80, Data em 120...
-        minhas_colunas = '60, 100, 150, 230, 280, 380, 420, 460, 520' 
+        minhas_colunas = '60, 100, 150, 230, 280, 380, 420, 460, 520'
 
-        # -----------------------------------------------------------------------------------------------------------
-        # INICIANDO TRATAMENTO EM CASOS DE TABELAS PROBLEMÁTICAS (aconteceu quando peguei um PDF com mais de um item)
-        # -----------------------------------------------------------------------------------------------------------
+        # --- TENTATIVA 1: Modo Automático Padrão ---
+        tabelas = camelot.read_pdf(caminho_arquivo, pages='1', flavor='stream')
         
-        # proteção 1: deixar o Camelot achar as colunas sozinho (Mais flexível para múltiplos itens)
-        tabelas = camelot.read_pdf(
-            caminho_arquivo, 
-            pages='1', 
-            flavor='stream',
-            edge_tol=500 # Aqui estou aumentando a sensibilidade dele as bordas das tabelas, ajuda a capturar tabelas comprimidas
-        )
-        
-        # proteção 2: se a tentativa automática falhar (0 tabelas), tentamos com as coordenadas fixas criadas anteriormente
+        # --- TENTATIVA 2: edge_tol alto ---
         if tabelas.n == 0:
-            print("💡 Tentando extração com coordenadas fixas...")
-            tabelas = camelot.read_pdf(
-                caminho_arquivo, 
-                pages='1', 
-                flavor='stream',
-                columns=[minhas_colunas]
-            )
+            print("🔄 Tabela rebelde detectada. Aumentando sensibilidade (edge_tol=500)...")
+            tabelas = camelot.read_pdf(caminho_arquivo, pages='1', flavor='stream', edge_tol=500)
+        
+        # --- TENTATIVA 3: Coordenadas fixas ---
+        if tabelas.n == 0:
+            print("💡 Tentando extração final com coordenadas fixas...")
+            tabelas = camelot.read_pdf(caminho_arquivo, pages='1', flavor='stream', columns=[minhas_colunas])
 
-        # proteção 3: se mesmo assim não achar, aí sim a gente desiste
         if tabelas.n == 0:
-            print("⚠️  Nenhuma tabela detectada em nenhum dos modos")
+            print("⚠️ Nenhuma tabela detectada em nenhum dos 3 modos")
             return itens_pedido
 
-        # proteção final: tenta acessar a tabela com segurança
-        try:
-            df = tabelas[0].df
-        except IndexError:
-            print("⚠️  Tabela fantasma detectada (Lista vazia)")
-            return itens_pedido
-        
-        # -----------------------------------------------------------------------------------------------------------
-        # FIM DO TRATAMENTO DAS TABELAS PROBLEMÁTICAS
-        # -----------------------------------------------------------------------------------------------------------
-        
-        # Vamos localizar a linha que contém o cabeçalho real
-        idx_cabecalho = -1
-        for i, linha in df.iterrows():
-            linha_str = " ".join(linha.astype(str)).upper()
-            if re.search(r"ITEM.*DESCRI", linha_str, re.IGNORECASE):
-                idx_cabecalho = i
-                print(f"🎯 Cabeçalho encontrado na linha {i}")
-                break
+        for idx_tabela in range(tabelas.n):
+            df = tabelas[idx_tabela].df
             
-        if idx_cabecalho != -1:
+            print(f"\n📄 Processando tabela {idx_tabela + 1} de {tabelas.n}...")
             
-            # Removemos tudo o que vem antes do cabeçalho, é bom para evitar capturas erradas
-            df_dados = df.iloc[idx_cabecalho + 1:]
+            # -------------------------------------------------------------------
+            # Todo o bloco de busca de cabeçalho e extração de itens entra aqui
+            # dentro desse for, sem nenhuma outra alteração
+            # -------------------------------------------------------------------
             
-            # Mapeamos as colunas baseadas na linha do cabeçalho
-            colunas = df.iloc[idx_cabecalho].tolist()
-            
-            # -------------------------------
-            # **********SUB-FUNÇÃO***********
-            # -------------------------------
-            
-            # Sub-função para buscar as colunas corretas pelo nome, isso é preciso pq elas podem mudar de posição
+            idx_cabecalho = -1
+            for i, linha in df.iterrows():
+                linha_str = " ".join(
+                    str(c).replace("\n", " ") for c in linha
+                ).upper()
+                if "ITEM" in linha_str and ("DESCRI" in linha_str or "PRODUTO" in linha_str):
+                    idx_cabecalho = i
+                    print(f"✅ Cabeçalho encontrado na linha {i} (tabela {idx_tabela + 1})")
+                    break
+
+            if idx_cabecalho == -1:
+                print(f"⏭️  Tabela {idx_tabela + 1} sem cabeçalho reconhecível, pulando...")
+                continue  # vai para a próxima tabela
+
+            linhas_extras = 0
+            for offset in range(1, 4):
+                idx_check = idx_cabecalho + offset
+                if idx_check >= len(df):
+                    break
+                
+                # Pega só a primeira sub-linha da célula 0 (antes do primeiro \n)
+                primeira_celula = str(df.iloc[idx_check, 0]).split("\n")[0].strip()
+                if not primeira_celula.isdigit():
+                    linhas_extras += 1
+                else:
+                    break
+
+            print(f"↕️  Linhas extras de cabeçalho detectadas: {linhas_extras}")
+
+            # -------------------------------------------------------------------
+            # monta colunas — expande \n de cada célula do bloco de cabeçalho
+            # garante que os índices em colunas[] batem com os do DataFrame
+            # -------------------------------------------------------------------
+            num_colunas_df = df.shape[1]
+            colunas = [""] * num_colunas_df  # inicializa com o tamanho real do DF
+
+            for offset in range(linhas_extras + 1):
+                for col_idx in range(num_colunas_df):
+                    celula = str(df.iloc[idx_cabecalho + offset, col_idx]).replace("\n", " ").strip()
+                    if celula:  # só sobrescreve se tiver conteúdo útil
+                        colunas[col_idx] = colunas[col_idx] + " " + celula
+
+            colunas = [c.strip() for c in colunas]
+            print(f"📋 Colunas mapeadas: {colunas}")
+
+            df_dados = df.iloc[idx_cabecalho + 1 + linhas_extras:]
+
             def buscar_col(termos):
                 for i, c in enumerate(colunas):
-                    if any(t.upper() in str(c).upper() for t in termos): return i
+                    if any(t.upper() in str(c).upper() for t in termos):
+                        return i
+                if "ITEM" in termos:
+                    return 0
                 return -1
 
-            coluna_item = buscar_col(["ITEM"])
-            coluna_data = buscar_col(["DATA", "REMESSA"])
+            coluna_item  = buscar_col(["ITEM"])
+            coluna_data  = buscar_col(["DATA", "REMESSA"])
             coluna_valor = buscar_col(["TOTAL"])
             coluna_reidi = buscar_col(["REIDI"])
 
+            print(f"🗂️  Colunas: item={coluna_item} | data={coluna_data} | valor={coluna_valor} | reidi={coluna_reidi}")
+
+            # -------------------------------------------------------------------
+            # LOOP DE ITENS
+            # col 0 tem item+data juntos por \n — extraímos por sub-linha
+            # -------------------------------------------------------------------
             for _, linha in df_dados.iterrows():
-                
-                # Limpeza e Captura Básica
-                v_item = str(linha[coluna_item]).strip() if coluna_item != -1 else ""
-                
-                # Itens de pedido costumam ser 00010, 00020...
-                # Se vier "UA", "TOTAL" ou vazio, a Lucy descarta na hora
+
+                celula_col0 = str(linha[0])
+                sublinhas   = [s.strip() for s in celula_col0.split("\n") if s.strip()]
+
+                # Sub-linha 0 da col 0 = número do item (ex: "00010")
+                v_item = sublinhas[0] if sublinhas else ""
+
                 if not v_item.isdigit():
                     continue
-                
-                # Convertendo o valor do Item para um valor Int para poder ser lido pela API, verifica novamente se é digito
-                v_item_int = int(v_item) if v_item.isdigit() else 0
-                
-                # Capturando o RAIDI usando a lógica de verificação de dois fatores
-                # Pegamos a opinião da tabela (Trava de segurança)
-                reidi_tabela = "NÃO"
-                if coluna_reidi != -1:
-                    conteudo = str(linha[coluna_reidi]).strip().upper()
-                    
-                    # só é SIM se estiver escrito SIM ou tiver um 'X'
-                    if conteudo in ["SIM", "X", "S"]:
-                        reidi_tabela = "SIM"
-                
-                # Se achamos a informação clara no texto (reidi_prioritario), usamos ela, senão, confiamos na tabela
-                # Basicamente verifica se ele existe, ou se recebemos algo, 
-                # nesse caso é a mesma coisa que validar se ela chegou mesmo
-                if reidi_prioritario:
-                    v_reidi = reidi_prioritario
-                    print("🧐 Peguei a informação de REIDI do texto")
+
+                v_item_int = int(v_item)
+
+                # -------------------------------------------------------------------
+                # data de remessa está na sub-linha 1 da col 0
+                # mas só se coluna_data apontar para col 0 (o que o dump confirmou)
+                # Se em outro PDF a data vier em coluna separada, o caminho normal funciona
+                # -------------------------------------------------------------------
+                if coluna_data == 0:
+                    # Procura qualquer sub-linha que pareça uma data (dd.mm.aaaa ou dd/mm/aaaa)
+                    data_encontrada = ""
+                    for sublinha in sublinhas:
+                        if re.search(r"\d{2}[./]\d{2}[./]\d{4}", sublinha):
+                            data_encontrada = sublinha.strip()
+                            break
+                    v_data_re_bruta = data_encontrada
                 else:
-                    v_reidi = reidi_tabela # Se ela não chegou então a gente confia na da tabela mesmo
-                    print("🚩 Não encontrei a informação de REIDI no texto, recorrendo a da tabela")
-                
-                # Captura bruta da data de remessa
-                v_data_re_bruta = str(linha[coluna_data]).strip() if coluna_data != -1 else ""
-                
-                # limpeza na data da remessa também
-                # Remove pontos, barras ou traços para padronizar e depois inverte
-                v_data_re_limpa = v_data_re_bruta.replace(".", "/") # Garante que tudo vire barra primeiro
-                
-                data_remessa_db = None # Inicializando como null por segurança, ele causará erro caso tenhamos problema com a data
-                
-                # Invertendo a data de remessa para o formato que é aceito no DB
+                    v_data_re_bruta = str(linha[coluna_data]).strip() if coluna_data != -1 else ""
+
+                # Limpeza e inversão da data — sem alteração
+                v_data_re_limpa = v_data_re_bruta.replace(".", "/")
+                data_remessa_db = None
                 if "/" in v_data_re_limpa:
                     partes_data = v_data_re_limpa.split("/")
                     if len(partes_data) == 3:
                         dia, mes, ano = partes_data
                         data_remessa_db = f"{ano}-{mes}-{dia}"
-                    else:
-                        data_remessa_db = None
-                else:
-                    data_remessa_db = None
-                
-                # Dentro do loop da extrair_tabela_com_camelot
-                v_valor_bruto = str(linha[coluna_valor]).strip() if coluna_valor != -1 else "0,00"
 
-                # Limpeza para virar número: remove ponto de milhar e troca vírgula decimal por ponto
+                # REIDI — sem alteração
+                reidi_tabela = "NÃO"
+                if coluna_reidi != -1:
+                    conteudo = str(linha[coluna_reidi]).strip().upper()
+                    if conteudo in ["SIM", "X", "S"]:
+                        reidi_tabela = "SIM"
+
+                if reidi_prioritario:
+                    v_reidi = reidi_prioritario
+                    print("🧐 Peguei a informação de REIDI do texto")
+                else:
+                    v_reidi = reidi_tabela
+                    print("🚩 Não encontrei a informação de REIDI no texto, recorrendo a da tabela")
+
+                # Valor total — sem alteração
+                v_valor_bruto = str(linha[coluna_valor]).strip() if coluna_valor != -1 else "0,00"
+                v_valor_bruto = v_valor_bruto.split("\n")[0].strip()  # pega só "Valor Total" real
                 v_valor_limpo = v_valor_bruto.replace(".", "").replace(",", ".")
 
-                # IS_REIDI é uma variável booleana (True/False), é uma convenção entre programadores experientes usar o is_
-                # pra indicar que a variável guarda um valor booleano
-                if v_reidi == "SIM":
-                    is_reidi = True   # Atribui o valor Booleano Verdadeiro
-                else:
-                    is_reidi = False  # Atribui o valor Booleano Falso
+                is_reidi = v_reidi == "SIM"
 
                 itens_pedido.append({
                     "item": v_item_int,
                     "data_remessa": data_remessa_db,
-                    "projeto": "", # Antes eu pegava pela tabela mas deu muito problema e n é preciso, melhor pelo texto
+                    "projeto": "",
                     "valor_total": v_valor_limpo,
-                    "reidi": is_reidi 
+                    "reidi": is_reidi
                 })
-                                                
+
     except Exception as e:
         print(f"⚠️  Erro no Camelot: {e}")
-        
+
     return itens_pedido
 
 # -------------------------------
@@ -341,9 +355,13 @@ def processar_informacoes(texto_bruto, caminho_arquivo):
                 
                 texto_linha = ""
                 for l in linhas_alvo:
-                    texto_linha += " " + " ".join(df_rodape.iloc[l].astype(str))
-                
+                    celulas = " ".join(
+                        str(c).replace("\n", " ") for c in df_rodape.iloc[l]
+                    )
+                    texto_linha += " " + celulas
+
                 texto_linha = re.sub(r"\s+", " ", texto_linha).upper()
+                
                 pos_projeto = texto_linha.find("PROJETO")
                 nums_encontrados = list(re.finditer(r"\b\d{8,12}\b", texto_linha))
                 
@@ -353,8 +371,8 @@ def processar_informacoes(texto_bruto, caminho_arquivo):
                     num = match.group()
                     pos_num = match.start()
                     
-                    # Filtros de Exclusão
-                    if num == v_pr or num in codigo_tabela:
+                    # só descarta se for exatamente igual ao projeto ou ao PR
+                    if num == v_pr or num == codigo_tabela.strip():
                         continue
                     
                     # Se o número vem depois da palavra PROJETO, ignoramos, pq ai não será o contrato mas outro número no meio
@@ -419,6 +437,27 @@ def comunicar_API(dados_json):
         else:
             print(f"❌ Falha no envio para a API - Erro: {resposta.status_code}")
             print(f"🔍 Detalhes do servidor: {resposta.text}") # Ajuda muito no debug
+            
+            try:
+                os.makedirs(pasta_json, exist_ok=True)
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                nome_log  = f"ERRO_API_{timestamp}_item{dados_json.get('item', 'X')}.json"
+                caminho_log = os.path.join(pasta_json, nome_log)
+                
+                log_erro = {
+                    "timestamp": timestamp,
+                    "status_code": resposta.status_code,
+                    "resposta_api": resposta.text,
+                    "payload_enviado": dados_json  # aqui você vê exatamente o que foi mandado
+                }
+                
+                with open(caminho_log, 'w', encoding='utf-8') as f:
+                    json.dump(log_erro, f, ensure_ascii=False, indent=4)
+                    
+                print(f"📝 Log de erro salvo em: {nome_log}")
+            except Exception as e_log:
+                print(f"⚠️ Não foi possível salvar o log de erro: {e_log}")
+            
             return False
 
     except requests.exceptions.RequestException as e:
