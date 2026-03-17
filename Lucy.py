@@ -48,36 +48,6 @@ def extrair_texto_do_pdf(caminho_arquivo):
 # *******************************
 # -------------------------------
 
-# Função responsável por buscar o número do projeto no texto caso ele não exista na tabela
-def extrair_projeto_do_texto(texto_bruto):
-
-    # Busca o número do projeto no texto caso a tabela falhe.
-    # Lógica: Procura o que está entre a palavra 'PROJETO' e o símbolo '#'
-    
-    try:
-        # Regex: Procura 'PROJETO', pula espaços/quebras, captura números/letras até o '#'
-        # O re.IGNORECASE garante que ache 'projeto', 'PROJETO' ou 'Projeto'
-        # o "(.*?)" não se refere a um ponto literal, mas sim a todo tipo de texto, é um "coringa"
-        # o "Dotall" é um complemento do coringa acima, pq ele n pega as quebras de linha, mas com o dotall ele consegue
-        match = re.search(r"PROJETO[:\s]+(.*?)(?=#)", texto_bruto, re.IGNORECASE | re.DOTALL)
-        
-        if match:
-            
-            # Limpeza extra para garantir que não pegamos sujeira
-            projeto_encontrado = match.group(1).strip()
-            
-            return projeto_encontrado
-        return None
-    
-    except Exception as e:
-        
-        print(f"⚠️ Erro na busca secundária de projeto: {e}")
-        return None
-
-# -------------------------------
-# *******************************
-# -------------------------------
-
 # Função responsável por utilizar o camelot para a extração dos dados da tabela, com o pypdf isso é muito complicado
 def extrair_tabela_com_camelot(caminho_arquivo, reidi_prioritario):
     itens_pedido = []
@@ -240,7 +210,6 @@ def extrair_tabela_com_camelot(caminho_arquivo, reidi_prioritario):
                 itens_pedido.append({
                     "item": v_item_int,
                     "data_remessa": data_remessa_db,
-                    "projeto": "",
                     "valor_total": v_valor_limpo,
                     "reidi": is_reidi
                 })
@@ -314,16 +283,6 @@ def processar_informacoes(texto_bruto, caminho_arquivo):
     # Passandos ela para a outra função conseguir utilizar, extração da tabela feita pelo Camelot e atribuição a uma variável
     itens_pedido = extrair_tabela_com_camelot(caminho_arquivo, reidi_prioritario)
 
-    # Busca o projeto no texto uma única vez, depois continuamos usando ela para todos os itens da tabela
-    projeto_recuperado = extrair_projeto_do_texto(texto_bruto)
-    
-    # Caso não tenha sido encontrar o número do projeto na tabela
-    for item in itens_pedido:
-        
-        # Se o projeto_do_texto existir, ele preenche
-        # Se não existir, o banco receberá ele como None
-        item["projeto"] = projeto_recuperado if projeto_recuperado else None
-
     # Coletando as informações adicionais via Camelot
     contrato_final = None # Para ir para o banco de dados como null preciso definir ela como None, o requests vai entender
     v_regiao = None
@@ -365,14 +324,12 @@ def processar_informacoes(texto_bruto, caminho_arquivo):
                 pos_projeto = texto_linha.find("PROJETO")
                 nums_encontrados = list(re.finditer(r"\b\d{8,12}\b", texto_linha))
                 
-                codigo_tabela = projeto_recuperado if projeto_recuperado else ""
-                
                 for match in nums_encontrados:
                     num = match.group()
                     pos_num = match.start()
                     
                     # só descarta se for exatamente igual ao projeto ou ao PR
-                    if num == v_pr or num == codigo_tabela.strip():
+                    if num == v_pr:
                         continue
                     
                     # Se o número vem depois da palavra PROJETO, ignoramos, pq ai não será o contrato mas outro número no meio
