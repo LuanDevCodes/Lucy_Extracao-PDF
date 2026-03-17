@@ -48,6 +48,36 @@ def extrair_texto_do_pdf(caminho_arquivo):
 # *******************************
 # -------------------------------
 
+# Função responsável por buscar o número do projeto no texto caso ele não exista na tabela
+def extrair_projeto_do_texto(texto_bruto):
+
+    # Busca o número do projeto no texto caso a tabela falhe.
+    # Lógica: Procura o que está entre a palavra 'PROJETO' e o símbolo '#'
+    
+    try:
+        # Regex: Procura 'PROJETO', pula espaços/quebras, captura números/letras até o '#'
+        # O re.IGNORECASE garante que ache 'projeto', 'PROJETO' ou 'Projeto'
+        # o "(.*?)" não se refere a um ponto literal, mas sim a todo tipo de texto, é um "coringa"
+        # o "Dotall" é um complemento do coringa acima, pq ele n pega as quebras de linha, mas com o dotall ele consegue
+        match = re.search(r"PROJETO[:\s]+(.*?)(?=#)", texto_bruto, re.IGNORECASE | re.DOTALL)
+        
+        if match:
+            
+            # Limpeza extra para garantir que não pegamos sujeira
+            projeto_encontrado = match.group(1).strip()
+            
+            return projeto_encontrado
+        return None
+    
+    except Exception as e:
+        
+        print(f"⚠️ Erro na busca secundária de projeto: {e}")
+        return None
+
+# -------------------------------
+# *******************************
+# -------------------------------
+
 # Função responsável por utilizar o camelot para a extração dos dados da tabela, com o pypdf isso é muito complicado
 def extrair_tabela_com_camelot(caminho_arquivo, reidi_prioritario):
     itens_pedido = []
@@ -106,7 +136,7 @@ def extrair_tabela_com_camelot(caminho_arquivo, reidi_prioritario):
                     # Limpeza e Captura Básica
                     v_item = str(linha[coluna_item]).strip() if coluna_item != -1 else ""
                     
-                    # Itens de pedido costumam ser 00010, 00020... 
+                    # Itens de pedido costumam ser 00010, 00020...
                     # Se vier "UA", "TOTAL" ou vazio, a Lucy descarta na hora
                     if not v_item.isdigit():
                         continue
@@ -269,6 +299,19 @@ def processar_informacoes(texto_bruto, caminho_arquivo):
     
     # Passandos ela para a outra função conseguir utilizar, extração da tabela feita pelo Camelot e atribuição a uma variável
     itens_pedido = extrair_tabela_com_camelot(caminho_arquivo, reidi_prioritario)
+
+    # Caso não tenha sido encontrar o número do projeto na tabela
+    for item in itens_pedido:
+    
+    # Se o projeto veio como "Descrição não localizada" ou está vazio
+        if not item["projeto"] or "não localizada" in item["projeto"].lower():
+            print(f"\n🔍 Projeto não achado na tabela do item {item['item']}. Buscando no texto...")
+            
+            projeto_alternativo = extrair_projeto_do_texto(texto_bruto)
+            
+            if projeto_alternativo:
+                item["projeto"] = projeto_alternativo
+                print(f"🎯 Projeto recuperado do texto: {projeto_alternativo}")
 
     # Coletando as informações adicionais via Camelot
     contrato_final = "Não encontrado"
