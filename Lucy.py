@@ -177,38 +177,6 @@ def extrair_tabela_com_camelot(caminho_arquivo, reidi_prioritario):
                         data_remessa_db = f"{ano}-{mes}-{dia}" # Formato DB: YYYY-MM-DD
                     else:
                         data_remessa_db = v_data_re_limpa # Fallback caso falhe, voltando pra versão anterior as mudanças
-                      
-                    # Buscando pela descrição utilizando uma sub-função
-                    def obter_desc_real(linha_atual, coluna_base):
-                        
-                        # Candidatos: a coluna alvo, a anterior e a próxima
-                        indices_para_testar = [coluna_base, coluna_base - 1, coluna_base + 1]
-                        
-                        for idx in indices_para_testar:
-                            
-                            # Pula se o índice for inválido para esta linha
-                            if idx < 0 or idx >= len(linha_atual):
-                                continue
-                                
-                            texto = str(linha_atual[idx]).replace("\n", " ").strip()
-                            
-                            # Só aceitamos se NÃO for "UA", NÃO for só número e tiver tamanho
-                            if texto and not texto.upper().startswith("UA") and not texto.isdigit() and len(texto) > 3:
-                                return texto
-                        return "Descrição não localizada"
-
-                    # Aplicando a busca
-                    v_proj_bruto = obter_desc_real(linha, coluna_proj)
-
-                    # Lógica do Traço, com ela conseguimos separar a descrição e pegar apenas o número
-                    partes = v_proj_bruto.split("-", 1)
-                    if len(partes) > 1 and any(c.isdigit() for c in partes[0]):
-                        projeto_final = partes[0].strip()
-                    else:
-                        projeto_final = v_proj_bruto
-
-                    # Limpeza final de resquícios de "UA" que possam ter grudado, é importante pq os dados estavam misturando
-                    projeto_final = re.sub(r"\s+UA\s+\d+", "", projeto_final, flags=re.IGNORECASE).strip()
                     
                     # Dentro do loop da extrair_tabela_com_camelot
                     v_valor_bruto = str(linha[coluna_valor]).strip() if coluna_valor != -1 else "0,00"
@@ -226,13 +194,13 @@ def extrair_tabela_com_camelot(caminho_arquivo, reidi_prioritario):
                     itens_pedido.append({
                         "item": v_item_int,
                         "data_remessa": data_remessa_db,
-                        "projeto": projeto_final,
+                        "projeto": "", # Antes eu pegava pela tabela mas deu muito problema e n é preciso, melhor pelo texto
                         "valor_total": v_valor_limpo,
                         "reidi": is_reidi 
                     })
                                                 
     except Exception as e:
-        print(f"⚠️ Erro no Camelot: {e}")
+        print(f"⚠️  Erro no Camelot: {e}")
         
     return itens_pedido
 
@@ -300,22 +268,19 @@ def processar_informacoes(texto_bruto, caminho_arquivo):
     # Passandos ela para a outra função conseguir utilizar, extração da tabela feita pelo Camelot e atribuição a uma variável
     itens_pedido = extrair_tabela_com_camelot(caminho_arquivo, reidi_prioritario)
 
+    # Iniciando as buscas pelo Projeto
+    projeto_do_texto = extrair_projeto_do_texto(texto_bruto)
+
     # Caso não tenha sido encontrar o número do projeto na tabela
     for item in itens_pedido:
-    
-    # Se o projeto veio como "Descrição não localizada" ou está vazio
-        if not item["projeto"] or "não localizada" in item["projeto"].lower():
-            print(f"\n🔍 Projeto não achado na tabela do item {item['item']}. Buscando no texto...")
-            
-            projeto_alternativo = extrair_projeto_do_texto(texto_bruto)
-            
-            if projeto_alternativo:
-                item["projeto"] = projeto_alternativo
-                print(f"🎯 Projeto recuperado do texto: {projeto_alternativo}")
+        
+        # Se o projeto_do_texto existir, ele preenche
+        # Se não existir, o banco receberá ele como None
+        item["projeto"] = projeto_do_texto if projeto_do_texto else None
 
     # Coletando as informações adicionais via Camelot
-    contrato_final = "Não encontrado"
-    v_regiao = "Não encontrada"
+    contrato_final = None # Para ir para o banco de dados como null preciso definir ela como None, o requests vai entender
+    v_regiao = None
 
     try:
         todas_as_tabelas = camelot.read_pdf(caminho_arquivo, pages='1', flavor='stream')
@@ -448,7 +413,7 @@ def main():
     try:
         
         if not os.path.exists(pasta_pdf):
-            print(f"⚠️ Pasta de PDF não encontrada: {pasta_pdf}")
+            print(f"⚠️  Pasta de PDF não encontrada: {pasta_pdf}")
             return 
 
         # Pegamos todos os arquivos .pdf da pasta
@@ -515,7 +480,7 @@ def main():
             if itens_sucesso == len(lista_de_itens):
                 print(f"📸 Todos os {len(lista_de_itens)} itens de '{nome_arquivo}' foram registrados")
             else:
-                print(f"⚠️ Atenção: Apenas {itens_sucesso}/{len(lista_de_itens)} itens foram registrados")
+                print(f"⚠️  Atenção: Apenas {itens_sucesso}/{len(lista_de_itens)} itens foram registrados")
                 
     except Exception as e:
         print(f"⚠️  Erro durante a extração: {e}")
