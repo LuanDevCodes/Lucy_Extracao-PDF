@@ -87,152 +87,152 @@ def extrair_tabela_com_camelot(caminho_arquivo, reidi_prioritario):
         # Exemplo: Item começa em 50, Req em 80, Data em 120...
         minhas_colunas = '60, 100, 150, 230, 280, 380, 420, 460, 520' 
 
+        # -----------------------------------------------------------------------------------------------------------
+        # INICIANDO TRATAMENTO EM CASOS DE TABELAS PROBLEMÁTICAS (aconteceu quando peguei um PDF com mais de um item)
+        # -----------------------------------------------------------------------------------------------------------
+        
+        # proteção 1: deixar o Camelot achar as colunas sozinho (Mais flexível para múltiplos itens)
         tabelas = camelot.read_pdf(
             caminho_arquivo, 
-            pages='1', # Isso é válido na coleta da tabela, ou seja, usaremos apenas a primeira página na coleta da tabela
+            pages='1', 
             flavor='stream',
-            columns=[minhas_colunas] # Forçamos as divisões aqui!
+            edge_tol=500
         )
         
-        if tabelas.n > 0:
+        # proteção 2: se a tentativa automática falhar (0 tabelas), tentamos com as coordenadas fixas criadas anteriormente
+        if tabelas.n == 0:
+            print("💡 Tentando extração com coordenadas fixas...")
+            tabelas = camelot.read_pdf(
+                caminho_arquivo, 
+                pages='1', 
+                flavor='stream',
+                columns=[minhas_colunas]
+            )
+
+        # proteção 3: se mesmo assim não achar, aí sim a gente desiste
+        if tabelas.n == 0:
+            print("⚠️  Nenhuma tabela detectada em nenhum dos modos")
+            return itens_pedido
+
+        # proteção final: tenta acessar a tabela com segurança
+        try:
+            df = tabelas[0].df
+        except IndexError:
+            print("⚠️  Tabela fantasma detectada (Lista vazia)")
+            return itens_pedido
+        
+        # -----------------------------------------------------------------------------------------------------------
+        # FIM DO TRATAMENTO DAS TABELAS PROBLEMÁTICAS
+        # -----------------------------------------------------------------------------------------------------------
+        
+        # Vamos localizar a linha que contém o cabeçalho real
+        idx_cabecalho = -1
+        for i, linha in df.iterrows():
+            linha_str = " ".join(linha.astype(str)).upper()
+            if re.search(r"ITEM.*DESCRI", linha_str, re.IGNORECASE):
+                idx_cabecalho = i
+                print(f"🎯 Cabeçalho encontrado na linha {i}")
+                break
             
-            # Pegamos a primeira tabela detectada
-            df = tabelas[0].df 
+        if idx_cabecalho != -1:
             
-            # Vamos localizar a linha que contém o cabeçalho real
-            idx_cabecalho = -1
-            for i, linha in df.iterrows():
-                linha_str = " ".join(linha.astype(str)).upper()
-                if "ITEM" in linha_str and "DESCRIÇÃO" in linha_str:
-                    idx_cabecalho = i
-                    break
+            # Removemos tudo o que vem antes do cabeçalho, é bom para evitar capturas erradas
+            df_dados = df.iloc[idx_cabecalho + 1:]
             
-            if idx_cabecalho != -1:
+            # Mapeamos as colunas baseadas na linha do cabeçalho
+            colunas = df.iloc[idx_cabecalho].tolist()
+            
+            # -------------------------------
+            # **********SUB-FUNÇÃO***********
+            # -------------------------------
+            
+            # Sub-função para buscar as colunas corretas pelo nome, isso é preciso pq elas podem mudar de posição
+            def buscar_col(termos):
+                for i, c in enumerate(colunas):
+                    if any(t.upper() in str(c).upper() for t in termos): return i
+                return -1
+
+            coluna_item = buscar_col(["ITEM"])
+            coluna_data = buscar_col(["DATA", "REMESSA"])
+            coluna_valor = buscar_col(["TOTAL"])
+            coluna_reidi = buscar_col(["REIDI"])
+
+            for _, linha in df_dados.iterrows():
                 
-                # Removemos tudo o que vem antes do cabeçalho, é bom para evitar capturas erradas
-                df_dados = df.iloc[idx_cabecalho + 1:]
+                # Limpeza e Captura Básica
+                v_item = str(linha[coluna_item]).strip() if coluna_item != -1 else ""
                 
-                # Mapeamos as colunas baseadas na linha do cabeçalho
-                colunas = df.iloc[idx_cabecalho].tolist()
+                # Itens de pedido costumam ser 00010, 00020...
+                # Se vier "UA", "TOTAL" ou vazio, a Lucy descarta na hora
+                if not v_item.isdigit():
+                    continue
                 
-                # -------------------------------
-                # **********SUB-FUNÇÃO***********
-                # -------------------------------
+                # Convertendo o valor do Item para um valor Int para poder ser lido pela API, verifica novamente se é digito
+                v_item_int = int(v_item) if v_item.isdigit() else 0
                 
-                # Sub-função para buscar as colunas corretas pelo nome, isso é preciso pq elas podem mudar de posição
-                def buscar_col(termos):
-                    for i, c in enumerate(colunas):
-                        if any(t.upper() in str(c).upper() for t in termos): return i
-                    return -1
-
-                coluna_item = buscar_col(["ITEM"])
-                coluna_data = buscar_col(["DATA", "REMESSA"])
-                coluna_proj = buscar_col(["DESCRIÇÃO", "PRODUTO"])
-                coluna_valor = buscar_col(["TOTAL"])
-                coluna_reidi = buscar_col(["REIDI"])
-
-                for _, linha in df_dados.iterrows():
+                # Capturando o RAIDI usando a lógica de verificação de dois fatores
+                # Pegamos a opinião da tabela (Trava de segurança)
+                reidi_tabela = "NÃO"
+                if coluna_reidi != -1:
+                    conteudo = str(linha[coluna_reidi]).strip().upper()
                     
-                    # Limpeza e Captura Básica
-                    v_item = str(linha[coluna_item]).strip() if coluna_item != -1 else ""
-                    
-                    # Itens de pedido costumam ser 00010, 00020...
-                    # Se vier "UA", "TOTAL" ou vazio, a Lucy descarta na hora
-                    if not v_item.isdigit():
-                        continue
-                    
-                    # Convertendo o valor do Item para um valor Int para poder ser lido pela API, verifica novamente se é digito
-                    v_item_int = int(v_item) if v_item.isdigit() else 0
-                    
-                    # Capturando o RAIDI usando a lógica de verificação de dois fatores
-                    # Pegamos a opinião da tabela (Trava de segurança)
-                    reidi_tabela = "NÃO"
-                    if coluna_reidi != -1:
-                        conteudo = str(linha[coluna_reidi]).strip().upper()
-                        
-                        # só é SIM se estiver escrito SIM ou tiver um 'X'
-                        if conteudo in ["SIM", "X", "S"]:
-                            reidi_tabela = "SIM"
-                    
-                    # Se achamos a informação clara no texto (reidi_prioritario), usamos ela, senão, confiamos na tabela
-                    # Basicamente verifica se ele existe, ou se recebemos algo, 
-                    # nesse caso é a mesma coisa que validar se ela chegou mesmo
-                    if reidi_prioritario:
-                        v_reidi = reidi_prioritario
-                        print("🧐 Peguei a informação de REIDI do texto")
+                    # só é SIM se estiver escrito SIM ou tiver um 'X'
+                    if conteudo in ["SIM", "X", "S"]:
+                        reidi_tabela = "SIM"
+                
+                # Se achamos a informação clara no texto (reidi_prioritario), usamos ela, senão, confiamos na tabela
+                # Basicamente verifica se ele existe, ou se recebemos algo, 
+                # nesse caso é a mesma coisa que validar se ela chegou mesmo
+                if reidi_prioritario:
+                    v_reidi = reidi_prioritario
+                    print("🧐 Peguei a informação de REIDI do texto")
+                else:
+                    v_reidi = reidi_tabela # Se ela não chegou então a gente confia na da tabela mesmo
+                    print("🚩 Não encontrei a informação de REIDI no texto, recorrendo a da tabela")
+                
+                # Captura bruta da data de remessa
+                v_data_re_bruta = str(linha[coluna_data]).strip() if coluna_data != -1 else ""
+                
+                # limpeza na data da remessa também
+                # Remove pontos, barras ou traços para padronizar e depois inverte
+                v_data_re_limpa = v_data_re_bruta.replace(".", "/") # Garante que tudo vire barra primeiro
+                
+                data_remessa_db = None # Inicializando como null por segurança, ele causará erro caso tenhamos problema com a data
+                
+                # Invertendo a data de remessa para o formato que é aceito no DB
+                if "/" in v_data_re_limpa:
+                    partes_data = v_data_re_limpa.split("/")
+                    if len(partes_data) == 3:
+                        dia, mes, ano = partes_data
+                        data_remessa_db = f"{ano}-{mes}-{dia}"
                     else:
-                        v_reidi = reidi_tabela # Se ela não chegou então a gente confia na da tabela mesmo
-                        print("🚩 Não encontrei a informação de REIDI no texto, recorrendo a da tabela")
-                    
-                    # Captura bruta da data de remessa
-                    v_data_re_bruta = str(linha[coluna_data]).strip() if coluna_data != -1 else ""
-                    
-                    # limpeza na data da remessa também
-                    # Remove pontos, barras ou traços para padronizar e depois inverte
-                    v_data_re_limpa = v_data_re_bruta.replace(".", "/") # Garante que tudo vire barra primeiro
-                    
-                    # Invertendo a data de remessa para o formato que é aceito no DB
-                    if "/" in v_data_re_limpa:
-                        dia, mes, ano = v_data_re_limpa.split("/")
-                        data_remessa_db = f"{ano}-{mes}-{dia}" # Formato DB: YYYY-MM-DD
-                    else:
-                        data_remessa_db = v_data_re_limpa # Fallback caso falhe, voltando pra versão anterior as mudanças
-                      
-                    # Buscando pela descrição utilizando uma sub-função
-                    def obter_desc_real(linha_atual, coluna_base):
-                        
-                        # Candidatos: a coluna alvo, a anterior e a próxima
-                        indices_para_testar = [coluna_base, coluna_base - 1, coluna_base + 1]
-                        
-                        for idx in indices_para_testar:
-                            
-                            # Pula se o índice for inválido para esta linha
-                            if idx < 0 or idx >= len(linha_atual):
-                                continue
-                                
-                            texto = str(linha_atual[idx]).replace("\n", " ").strip()
-                            
-                            # Só aceitamos se NÃO for "UA", NÃO for só número e tiver tamanho
-                            if texto and not texto.upper().startswith("UA") and not texto.isdigit() and len(texto) > 3:
-                                return texto
-                        return "Descrição não localizada"
+                        data_remessa_db = None
+                else:
+                    data_remessa_db = None
+                
+                # Dentro do loop da extrair_tabela_com_camelot
+                v_valor_bruto = str(linha[coluna_valor]).strip() if coluna_valor != -1 else "0,00"
 
-                    # Aplicando a busca
-                    v_proj_bruto = obter_desc_real(linha, coluna_proj)
+                # Limpeza para virar número: remove ponto de milhar e troca vírgula decimal por ponto
+                v_valor_limpo = v_valor_bruto.replace(".", "").replace(",", ".")
 
-                    # Lógica do Traço, com ela conseguimos separar a descrição e pegar apenas o número
-                    partes = v_proj_bruto.split("-", 1)
-                    if len(partes) > 1 and any(c.isdigit() for c in partes[0]):
-                        projeto_final = partes[0].strip()
-                    else:
-                        projeto_final = v_proj_bruto
+                # IS_REIDI é uma variável booleana (True/False), é uma convenção entre programadores experientes usar o is_
+                # pra indicar que a variável guarda um valor booleano
+                if v_reidi == "SIM":
+                    is_reidi = True   # Atribui o valor Booleano Verdadeiro
+                else:
+                    is_reidi = False  # Atribui o valor Booleano Falso
 
-                    # Limpeza final de resquícios de "UA" que possam ter grudado, é importante pq os dados estavam misturando
-                    projeto_final = re.sub(r"\s+UA\s+\d+", "", projeto_final, flags=re.IGNORECASE).strip()
-                    
-                    # Dentro do loop da extrair_tabela_com_camelot
-                    v_valor_bruto = str(linha[coluna_valor]).strip() if coluna_valor != -1 else "0,00"
-
-                    # Limpeza para virar número: remove ponto de milhar e troca vírgula decimal por ponto
-                    v_valor_limpo = v_valor_bruto.replace(".", "").replace(",", ".")
-
-                    # IS_REIDI é uma variável booleana (True/False), é uma convenção entre programadores experientes usar o is_
-                    # pra indicar que a variável guarda um valor booleano
-                    if v_reidi == "SIM":
-                        is_reidi = True   # Atribui o valor Booleano Verdadeiro
-                    else:
-                        is_reidi = False  # Atribui o valor Booleano Falso
-
-                    itens_pedido.append({
-                        "item": v_item_int,
-                        "data_remessa": data_remessa_db,
-                        "projeto": projeto_final,
-                        "valor_total": v_valor_limpo,
-                        "reidi": is_reidi 
-                    })
+                itens_pedido.append({
+                    "item": v_item_int,
+                    "data_remessa": data_remessa_db,
+                    "projeto": "", # Antes eu pegava pela tabela mas deu muito problema e n é preciso, melhor pelo texto
+                    "valor_total": v_valor_limpo,
+                    "reidi": is_reidi 
+                })
                                                 
     except Exception as e:
-        print(f"⚠️ Erro no Camelot: {e}")
+        print(f"⚠️  Erro no Camelot: {e}")
         
     return itens_pedido
 
@@ -300,22 +300,19 @@ def processar_informacoes(texto_bruto, caminho_arquivo):
     # Passandos ela para a outra função conseguir utilizar, extração da tabela feita pelo Camelot e atribuição a uma variável
     itens_pedido = extrair_tabela_com_camelot(caminho_arquivo, reidi_prioritario)
 
+    # Busca o projeto no texto uma única vez, depois continuamos usando ela para todos os itens da tabela
+    projeto_recuperado = extrair_projeto_do_texto(texto_bruto)
+    
     # Caso não tenha sido encontrar o número do projeto na tabela
     for item in itens_pedido:
-    
-    # Se o projeto veio como "Descrição não localizada" ou está vazio
-        if not item["projeto"] or "não localizada" in item["projeto"].lower():
-            print(f"\n🔍 Projeto não achado na tabela do item {item['item']}. Buscando no texto...")
-            
-            projeto_alternativo = extrair_projeto_do_texto(texto_bruto)
-            
-            if projeto_alternativo:
-                item["projeto"] = projeto_alternativo
-                print(f"🎯 Projeto recuperado do texto: {projeto_alternativo}")
+        
+        # Se o projeto_do_texto existir, ele preenche
+        # Se não existir, o banco receberá ele como None
+        item["projeto"] = projeto_recuperado if projeto_recuperado else None
 
     # Coletando as informações adicionais via Camelot
-    contrato_final = "Não encontrado"
-    v_regiao = "Não encontrada"
+    contrato_final = None # Para ir para o banco de dados como null preciso definir ela como None, o requests vai entender
+    v_regiao = None
 
     try:
         todas_as_tabelas = camelot.read_pdf(caminho_arquivo, pages='1', flavor='stream')
@@ -350,7 +347,7 @@ def processar_informacoes(texto_bruto, caminho_arquivo):
                 pos_projeto = texto_linha.find("PROJETO")
                 nums_encontrados = list(re.finditer(r"\b\d{8,12}\b", texto_linha))
                 
-                codigo_tabela = itens_pedido[0]['projeto'] if itens_pedido else ""
+                codigo_tabela = projeto_recuperado if projeto_recuperado else ""
                 
                 for match in nums_encontrados:
                     num = match.group()
@@ -448,7 +445,7 @@ def main():
     try:
         
         if not os.path.exists(pasta_pdf):
-            print(f"⚠️ Pasta de PDF não encontrada: {pasta_pdf}")
+            print(f"⚠️  Pasta de PDF não encontrada: {pasta_pdf}")
             return 
 
         # Pegamos todos os arquivos .pdf da pasta
@@ -515,13 +512,13 @@ def main():
             if itens_sucesso == len(lista_de_itens):
                 print(f"📸 Todos os {len(lista_de_itens)} itens de '{nome_arquivo}' foram registrados")
             else:
-                print(f"⚠️ Atenção: Apenas {itens_sucesso}/{len(lista_de_itens)} itens foram registrados")
+                print(f"⚠️  Atenção: Apenas {itens_sucesso}/{len(lista_de_itens)} itens foram registrados")
                 
     except Exception as e:
         print(f"⚠️  Erro durante a extração: {e}")
         
     print(f"\n💤  Lucy encerrando suas atividades - {get_hora_atual()}")
-    print("-" * 70)
+    print("-" * 70 + "\n")
 
 # O 'if __name__' garante que o robô só comece a rodar se este arquivo for executado diretamente
 # isso evita que o loop infinito da Lucy ligue sozinho caso as funções sejam importadas em outro arquivo
