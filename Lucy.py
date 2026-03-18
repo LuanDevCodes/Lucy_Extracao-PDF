@@ -58,18 +58,18 @@ def extrair_tabela_com_camelot(caminho_arquivo, reidi_prioritario):
         # TENTATIVA 1: Modo Automático Padrão 
         tabelas = camelot.read_pdf(caminho_arquivo, pages='1', flavor='stream')
         
-        # TENTATIVA 2: edge_tol alto 
+        # TENTATIVA 2: edge_tol alto para tabelas mais problemáticas, deixa mais sensível
         if tabelas.n == 0:
             print("🔄 Tabela rebelde detectada. Aumentando sensibilidade (edge_tol=500)...")
             tabelas = camelot.read_pdf(caminho_arquivo, pages='1', flavor='stream', edge_tol=500)
         
-        # TENTATIVA 3: Coordenadas fixas 
+        # TENTATIVA 3: Coordenadas fixas, funcionam nos PDF's padrões
         if tabelas.n == 0:
             print("💡 Tentando extração final com coordenadas fixas...")
             tabelas = camelot.read_pdf(caminho_arquivo, pages='1', flavor='stream', columns=[minhas_colunas])
 
         if tabelas.n == 0:
-            print("⚠️ Nenhuma tabela detectada em nenhum dos 3 modos")
+            print("⚠️  Nenhuma tabela detectada em nenhum dos 3 modos")
             return itens_pedido
 
         for idx_tabela in range(tabelas.n):
@@ -94,6 +94,7 @@ def extrair_tabela_com_camelot(caminho_arquivo, reidi_prioritario):
             linhas_extras = 0
             for offset in range(1, 4):
                 idx_check = idx_cabecalho + offset
+                
                 if idx_check >= len(df):
                     break
                 
@@ -179,7 +180,7 @@ def extrair_tabela_com_camelot(caminho_arquivo, reidi_prioritario):
                     partes_data = v_data_re_limpa.split("/")
                     if len(partes_data) == 3:
                         dia, mes, ano = partes_data
-                        data_remessa_db = f"{ano}-{mes}-{dia}"
+                        data_remessa_db = f"{ano}-{mes}-{dia}" # Colocando no padrão que o DB aceita
 
                 # REIDI
                 reidi_tabela = "NÃO"
@@ -195,12 +196,16 @@ def extrair_tabela_com_camelot(caminho_arquivo, reidi_prioritario):
                     v_reidi = reidi_tabela
                     print("🚩 Não encontrei a informação de REIDI no texto, recorrendo a da tabela")
 
-                # Valor total — sem alteração
+                # Valor total
                 v_valor_bruto = str(linha[coluna_valor]).strip() if coluna_valor != -1 else "0,00"
                 v_valor_bruto = v_valor_bruto.split("\n")[0].strip()  # pega só "Valor Total" real
                 v_valor_limpo = v_valor_bruto.replace(".", "").replace(",", ".")
 
-                is_reidi = v_reidi == "SIM"
+                # o prefixo "is_" é uma convenção entre programadores, indica que a variável sempre guarda um booleano
+                if v_reidi == "SIM":
+                    is_reidi = True
+                else:
+                    is_reidi = False
 
                 itens_pedido.append({
                     "item": v_item_int,
@@ -427,7 +432,7 @@ def get_hora_atual() -> str:
     return datetime.now().strftime("%H:%M")
 
 # --------------------------------------------------------------------------------------------------------------------
-# A FUNÇÃO MAIN DO PROJETO - AGORA ELA É RESPONSÁVEL POR REALIZAR A EXTRAÇÃO E ENVIAR PRO DB DIRETO
+# A FUNÇÃO MAIN DO PROJETO - AGORA ELA É RESPONSÁVEL POR REALIZAR A EXTRAÇÃO E ENVIAR PRO DB DIRETO (por meio da API)
 # --------------------------------------------------------------------------------------------------------------------
 
 def main():
@@ -470,8 +475,6 @@ def main():
                 payload = dados_base.copy()
                 payload.update(item_tabela)
                 
-                # Por enquanto mantemos o envio para a API que você já tem
-                # Logo abaixo adicionaremos a função que insere direto no DB SQL
                 if comunicar_API(payload):
                     itens_sucesso = itens_sucesso + 1
                 else:
