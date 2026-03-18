@@ -55,15 +55,15 @@ def extrair_tabela_com_camelot(caminho_arquivo, reidi_prioritario):
     try:
         minhas_colunas = '60, 100, 150, 230, 280, 380, 420, 460, 520'
 
-        # --- TENTATIVA 1: Modo Automático Padrão ---
+        # TENTATIVA 1: Modo Automático Padrão 
         tabelas = camelot.read_pdf(caminho_arquivo, pages='1', flavor='stream')
         
-        # --- TENTATIVA 2: edge_tol alto ---
+        # TENTATIVA 2: edge_tol alto 
         if tabelas.n == 0:
             print("🔄 Tabela rebelde detectada. Aumentando sensibilidade (edge_tol=500)...")
             tabelas = camelot.read_pdf(caminho_arquivo, pages='1', flavor='stream', edge_tol=500)
         
-        # --- TENTATIVA 3: Coordenadas fixas ---
+        # TENTATIVA 3: Coordenadas fixas 
         if tabelas.n == 0:
             print("💡 Tentando extração final com coordenadas fixas...")
             tabelas = camelot.read_pdf(caminho_arquivo, pages='1', flavor='stream', columns=[minhas_colunas])
@@ -76,11 +76,6 @@ def extrair_tabela_com_camelot(caminho_arquivo, reidi_prioritario):
             df = tabelas[idx_tabela].df
             
             print(f"\n📄 Processando tabela {idx_tabela + 1} de {tabelas.n}...")
-            
-            # -------------------------------------------------------------------
-            # Todo o bloco de busca de cabeçalho e extração de itens entra aqui
-            # dentro desse for, sem nenhuma outra alteração
-            # -------------------------------------------------------------------
             
             idx_cabecalho = -1
             for i, linha in df.iterrows():
@@ -163,10 +158,10 @@ def extrair_tabela_com_camelot(caminho_arquivo, reidi_prioritario):
 
                 # -------------------------------------------------------------------
                 # data de remessa está na sub-linha 1 da col 0
-                # mas só se coluna_data apontar para col 0 (o que o dump confirmou)
-                # Se em outro PDF a data vier em coluna separada, o caminho normal funciona
+                # mas só se coluna_data apontar para col 0
                 # -------------------------------------------------------------------
                 if coluna_data == 0:
+                    
                     # Procura qualquer sub-linha que pareça uma data (dd.mm.aaaa ou dd/mm/aaaa)
                     data_encontrada = ""
                     for sublinha in sublinhas:
@@ -177,7 +172,7 @@ def extrair_tabela_com_camelot(caminho_arquivo, reidi_prioritario):
                 else:
                     v_data_re_bruta = str(linha[coluna_data]).strip() if coluna_data != -1 else ""
 
-                # Limpeza e inversão da data — sem alteração
+                # Limpeza e inversão da data
                 v_data_re_limpa = v_data_re_bruta.replace(".", "/")
                 data_remessa_db = None
                 if "/" in v_data_re_limpa:
@@ -186,7 +181,7 @@ def extrair_tabela_com_camelot(caminho_arquivo, reidi_prioritario):
                         dia, mes, ano = partes_data
                         data_remessa_db = f"{ano}-{mes}-{dia}"
 
-                # REIDI — sem alteração
+                # REIDI
                 reidi_tabela = "NÃO"
                 if coluna_reidi != -1:
                     conteudo = str(linha[coluna_reidi]).strip().upper()
