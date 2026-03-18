@@ -207,12 +207,18 @@ def extrair_tabela_com_camelot(caminho_arquivo, reidi_prioritario):
                 else:
                     is_reidi = False
 
-                itens_pedido.append({
-                    "item": v_item_int,
-                    "data_remessa": data_remessa_db,
-                    "valor_total": v_valor_limpo,
-                    "reidi": is_reidi
-                })
+                # Remodelação, só adiciona se o número do item ainda não estiver na lista, evitando as duplicatas de pedidos
+                itens_ja_inseridos = [i["item"] for i in itens_pedido]
+
+                if v_item_int not in itens_ja_inseridos:
+                    itens_pedido.append({
+                        "item": v_item_int,
+                        "data_remessa": data_remessa_db,
+                        "valor_total": v_valor_limpo,
+                        "reidi": is_reidi
+                    })
+                else:
+                    print(f"⏭️  Item {v_item_int} já registrado, pulando duplicata...")
 
     except Exception as e:
         print(f"⚠️  Erro no Camelot: {e}")
@@ -279,7 +285,7 @@ def processar_informacoes(texto_bruto, caminho_arquivo):
     # Ex: 4)REIDI: NÃO ou 1) REIDI: SIM
     match_reidi_global = re.search(r"\d+\)\s*REIDI:\s*(SIM|NÃO)", texto_bruto, re.IGNORECASE)
     reidi_prioritario = match_reidi_global.group(1).upper() if match_reidi_global else None
-    
+
     # Passandos ela para a outra função conseguir utilizar, extração da tabela feita pelo Camelot e atribuição a uma variável
     itens_pedido = extrair_tabela_com_camelot(caminho_arquivo, reidi_prioritario)
 
@@ -288,63 +294,26 @@ def processar_informacoes(texto_bruto, caminho_arquivo):
     v_regiao = None
 
     try:
-        todas_as_tabelas = camelot.read_pdf(caminho_arquivo, pages='1', flavor='stream')
+        # Busca o contrato direto no texto bruto, igual aos outros campos
+        # Lógica: pega o número que vem após "CONTRATO" e antes de "PROJETO", coloquei um monte de variações por medo dele quebrar
+        match_contrato = re.search(
+            r"CONTRATO\s*"           # palavra CONTRATO com espaços opcionais
+            r"(?:GUARDA\s+CHUVA\s+|" # variante: GUARDA CHUVA
+            r"N[ºo°]?\s*[:\-]?\s*|"  # variante: Nº, No, N°, N: N-
+            r"DE\s+SERVI[ÇC]OS?\s+|" # variante: DE SERVIÇOS, DE SERVICOS
+            r"DE\s+FORNECIMENTO\s+)??"  # variante: DE FORNECIMENTO
+            r"(\d{6,12})",            # captura o número de 6 a 12 dígitos
+            texto_bruto,
+            re.IGNORECASE
+        )
         
-        if todas_as_tabelas.n > 0:
-            df_rodape = todas_as_tabelas[-1].df
-            linha_regiao = -1
-            
-            # Localiza o simbolo # (Procura a âncora), com ele fica muito mais fácil se guiar e limitar a área de busca
-            # A variável de região, apesar de ser coletada não é passada para API ou JSON, é mais para localização no texto
-            for l in range(len(df_rodape)):
-                for c in range(len(df_rodape.columns)):
-                    celula = str(df_rodape.iloc[l, c])
-                    if "#" in celula:
-                        linha_regiao = l
-                        v_regiao = celula.split("#")[-1].strip()
-                        v_regiao = re.split(r"\s{2,}", v_regiao)[0].strip()
-                        break
-                if linha_regiao != -1: break
+        contrato_final = match_contrato.group(1) if match_contrato else None
 
-            # Processando o contrato, por isso a importância do # acima, me guio com ele para achar as outras informações
-            if linha_regiao != -1:
-                
-                # Pegamos o texto das linhas próximas (3 acima e 2 abaixo)
-                linhas_alvo = range(max(0, linha_regiao - 3), min(len(df_rodape), linha_regiao + 2))
-                
-                texto_linha = ""
-                for l in linhas_alvo:
-                    celulas = " ".join(
-                        str(c).replace("\n", " ") for c in df_rodape.iloc[l]
-                    )
-                    texto_linha += " " + celulas
-
-                texto_linha = re.sub(r"\s+", " ", texto_linha).upper()
-                
-                pos_projeto = texto_linha.find("PROJETO")
-                nums_encontrados = list(re.finditer(r"\b\d{8,12}\b", texto_linha))
-                
-                for match in nums_encontrados:
-                    num = match.group()
-                    pos_num = match.start()
-                    
-                    # só descarta se for exatamente igual ao projeto ou ao PR
-                    if num == v_pr:
-                        continue
-                    
-                    # Se o número vem depois da palavra PROJETO, ignoramos, pq ai não será o contrato mas outro número no meio
-                    if pos_projeto != -1 and pos_num > pos_projeto:
-                        continue
-                    
-                    # Se chegou aqui, é o Contrato de fato e podemos pegar ele
-                    contrato_final = num
-                    break 
-
-            print(f"\n--- DEBUG LUCY ---")
-            print(f"📃 Contrato Identificado: {contrato_final}")
+        print(f"\n--- DEBUG LUCY ---")
+        print(f"📃 Contrato Identificado: {contrato_final}")
 
     except Exception as e:
-        print(f"⚠️  Erro ao processar vizinhança: {e}")
+        print(f"⚠️  Erro ao processar contrato: {e}")
 
     # Montagem final do Json, por causa da API é necessário fazer a montagem no modo payload plano
     dados_finais = {
@@ -470,10 +439,10 @@ def main():
             itens_sucesso = 0
             
             # Registrando item por item
-            # Aqui ela percorre a tabela e entrega cada linha individualmente
+            # Aqui ela percorre a tabela e entrega cada linha individualmente e sem nenhuma lista
             for item_tabela in lista_de_itens:
                 payload = dados_base.copy()
-                payload.update(item_tabela)
+                payload.update(item_tabela) # como é um update por itens, ele junta tudo numa sopa e envia para API
                 
                 if comunicar_API(payload):
                     itens_sucesso = itens_sucesso + 1
