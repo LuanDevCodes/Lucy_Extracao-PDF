@@ -1,3 +1,20 @@
+# Configurando tudo que vai ser ignorado
+
 .env
-__pycache__/
 *.pdf
+
+# Cache do Python e arquivos compilados
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Ambientes Virtuais (por via das dúvidas)
+venv/
+.venv/
+env/
+
+# Configurações de IDE e Sistema Operacional (por via das dúvidas)
+.vscode/
+.idea/
+.DS_Store
