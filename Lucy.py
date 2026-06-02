@@ -325,7 +325,7 @@ def processar_informacoes(texto_bruto, caminho_arquivo):
             "endereco": end_bruto,
             "logradouro": logradouro,
             "numero_endereco": numero_end,
-            "bairro": "",
+            "bairro": "N/D",
             "cep": cep,
             "contrato": contrato_final,
             
