@@ -1,7 +1,8 @@
-# Configurando tudo que vai ser ignorado
-
+# Arquivos de configurações
 .env
 *.pdf
+GEMINI.md
+*log_*
 
 # Cache do Python e arquivos compilados
 __pycache__/
