@@ -32,6 +32,23 @@ url_api = os.getenv("URL_API")
 # *******************************
 # -------------------------------
 
+# Função simples para registrar os eventos em um arquivo de texto (LOG)
+def registrar_log(mensagem: str):
+    
+    try:
+        data_agora = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+        
+        with open("log_lucy.txt", "a", encoding="utf-8") as arquivo:
+            arquivo.write(f"[{data_agora}] {mensagem}\n")
+
+    except Exception as e:
+        msg_erro_log = f"⚠️  Erro ao gravar no arquivo de log: {e}"
+        print(msg_erro_log)
+
+# -------------------------------
+# *******************************
+# -------------------------------
+
 # Função responsável por extrair todo o texto do PDF
 def extrair_texto_do_pdf(caminho_arquivo):
     try:
@@ -41,7 +58,9 @@ def extrair_texto_do_pdf(caminho_arquivo):
             texto_completo = texto_completo + pagina.extract_text()
         return texto_completo
     except Exception as e:
-        print(f"❌ Erro ao ler o arquivo {caminho_arquivo}: {e}")
+        msg_erro_ler = f"❌ Erro ao ler o arquivo {caminho_arquivo}: {e}"
+        print(msg_erro_ler)
+        registrar_log(msg_erro_ler)
         return None
 
 # -------------------------------
@@ -60,22 +79,30 @@ def extrair_tabela_com_camelot(caminho_arquivo, reidi_prioritario):
         
         # TENTATIVA 2: edge_tol alto para tabelas mais problemáticas, deixa mais sensível
         if tabelas.n == 0:
-            print("🔄 Tabela rebelde detectada. Aumentando sensibilidade (edge_tol=500)...")
+            msg_tabela_rebelde = "🔄 Tabela rebelde detectada - Aumentando sensibilidade (edge_tol=500)"
+            print(msg_tabela_rebelde)
+            registrar_log(msg_tabela_rebelde)
             tabelas = camelot.read_pdf(caminho_arquivo, pages='1', flavor='stream', edge_tol=500)
         
         # TENTATIVA 3: Coordenadas fixas, funcionam nos PDF's padrões
         if tabelas.n == 0:
-            print("💡 Tentando extração final com coordenadas fixas...")
+            msg_tentando_coord = "💡 Tentando extração final com coordenadas fixas..."
+            print(msg_tentando_coord)
+            registrar_log(msg_tentando_coord)
             tabelas = camelot.read_pdf(caminho_arquivo, pages='1', flavor='stream', columns=[minhas_colunas])
 
         if tabelas.n == 0:
-            print("⚠️  Nenhuma tabela detectada em nenhum dos 3 modos")
+            msg_nenhuma_tabela = "⚠️  Nenhuma tabela detectada em nenhum dos 3 modos"
+            print(msg_nenhuma_tabela)
+            registrar_log(msg_nenhuma_tabela)
             return itens_pedido
 
         for idx_tabela in range(tabelas.n):
             df = tabelas[idx_tabela].df
             
-            print(f"\n📄 Processando tabela {idx_tabela + 1} de {tabelas.n}...")
+            msg_processando_tab = f"\n📄 Processando tabela {idx_tabela + 1} de {tabelas.n}..."
+            print(msg_processando_tab)
+            registrar_log(msg_processando_tab.strip())
             
             idx_cabecalho = -1
             for i, linha in df.iterrows():
@@ -84,11 +111,15 @@ def extrair_tabela_com_camelot(caminho_arquivo, reidi_prioritario):
                 ).upper()
                 if "ITEM" in linha_str and ("DESCRI" in linha_str or "PRODUTO" in linha_str):
                     idx_cabecalho = i
-                    print(f"✅ Cabeçalho encontrado na linha {i} (tabela {idx_tabela + 1})")
+                    msg_cabecalho_enc = f"✅ Cabeçalho encontrado na linha {i} (tabela {idx_tabela + 1})"
+                    print(msg_cabecalho_enc)
+                    registrar_log(msg_cabecalho_enc)
                     break
 
             if idx_cabecalho == -1:
-                print(f"⏭️  Tabela {idx_tabela + 1} sem cabeçalho reconhecível, pulando...")
+                msg_sem_cabecalho = f"⏭️  Tabela {idx_tabela + 1} sem cabeçalho reconhecível, pulando..."
+                print(msg_sem_cabecalho)
+                registrar_log(msg_sem_cabecalho)
                 continue  # vai para a próxima tabela
 
             linhas_extras = 0
@@ -105,7 +136,9 @@ def extrair_tabela_com_camelot(caminho_arquivo, reidi_prioritario):
                 else:
                     break
 
-            print(f"↕️  Linhas extras de cabeçalho detectadas: {linhas_extras}")
+            msg_linhas_extras = f"↕️  Linhas extras de cabeçalho detectadas: {linhas_extras}"
+            print(msg_linhas_extras)
+            registrar_log(msg_linhas_extras)
 
             # -------------------------------------------------------------------
             # monta colunas — expande \n de cada célula do bloco de cabeçalho
@@ -121,7 +154,9 @@ def extrair_tabela_com_camelot(caminho_arquivo, reidi_prioritario):
                         colunas[col_idx] = colunas[col_idx] + " " + celula
 
             colunas = [c.strip() for c in colunas]
-            print(f"📋 Colunas mapeadas: {colunas}")
+            msg_colunas_mapeadas = f"📋 Colunas mapeadas: {colunas}"
+            print(msg_colunas_mapeadas)
+            registrar_log(msg_colunas_mapeadas)
 
             df_dados = df.iloc[idx_cabecalho + 1 + linhas_extras:]
 
@@ -138,7 +173,9 @@ def extrair_tabela_com_camelot(caminho_arquivo, reidi_prioritario):
             coluna_valor = buscar_col(["TOTAL"])
             coluna_reidi = buscar_col(["REIDI"])
 
-            print(f"🗂️  Colunas: item={coluna_item} | data={coluna_data} | valor={coluna_valor} | reidi={coluna_reidi}")
+            msg_info_colunas = f"🗂️  Colunas: item={coluna_item} | data={coluna_data} | valor={coluna_valor} | reidi={coluna_reidi}"
+            print(msg_info_colunas)
+            registrar_log(msg_info_colunas)
 
             # -------------------------------------------------------------------
             # LOOP DE ITENS
@@ -191,10 +228,14 @@ def extrair_tabela_com_camelot(caminho_arquivo, reidi_prioritario):
 
                 if reidi_prioritario:
                     v_reidi = reidi_prioritario
-                    print("🧐 Peguei a informação de REIDI do texto")
+                    msg_reidi_texto = "🧐 Peguei a informação de REIDI do texto"
+                    print(msg_reidi_texto)
+                    registrar_log(msg_reidi_texto)
                 else:
                     v_reidi = reidi_tabela
-                    print("🚩 Não encontrei a informação de REIDI no texto, recorrendo a da tabela")
+                    msg_reidi_tabela = "🚩 Não encontrei a informação de REIDI no texto, recorrendo a da tabela"
+                    print(msg_reidi_tabela)
+                    registrar_log(msg_reidi_tabela)
 
                 # Valor total
                 v_valor_bruto = str(linha[coluna_valor]).strip() if coluna_valor != -1 else "0,00"
@@ -218,10 +259,14 @@ def extrair_tabela_com_camelot(caminho_arquivo, reidi_prioritario):
                         "reidi": is_reidi
                     })
                 else:
-                    print(f"⏭️  Item {v_item_int} já registrado, pulando duplicata...")
+                    msg_pulando_dup = f"⏭️  Item {v_item_int} já registrado, pulando duplicata..."
+                    print(msg_pulando_dup)
+                    registrar_log(msg_pulando_dup)
 
     except Exception as e:
-        print(f"⚠️  Erro no Camelot: {e}")
+        msg_erro_camelot = f"⚠️  Erro no Camelot: {e}"
+        print(msg_erro_camelot)
+        registrar_log(msg_erro_camelot)
 
     return itens_pedido
 
@@ -309,11 +354,18 @@ def processar_informacoes(texto_bruto, caminho_arquivo):
         
         contrato_final = match_contrato.group(1) if match_contrato else None
 
-        print(f"\n--- DEBUG LUCY ---")
-        print(f"📃 Contrato Identificado: {contrato_final}")
+        msg_debug_lucy = "\n--- DEBUG LUCY ---"
+        print(msg_debug_lucy)
+        registrar_log(msg_debug_lucy.strip())
+        
+        msg_contrato_id = f"📃 Contrato Identificado: {contrato_final}"
+        print(msg_contrato_id)
+        registrar_log(msg_contrato_id)
 
     except Exception as e:
-        print(f"⚠️  Erro ao processar contrato: {e}")
+        msg_erro_contrato = f"⚠️  Erro ao processar contrato: {e}"
+        print(msg_erro_contrato)
+        registrar_log(msg_erro_contrato)
 
     # Montagem final do Json, por causa da API é necessário fazer a montagem no modo payload plano
     dados_finais = {
@@ -346,7 +398,9 @@ def processar_informacoes(texto_bruto, caminho_arquivo):
 def comunicar_API(dados_json):
     
     if not url_api:
-        print("⚠️ Erro: URL da API não configurada no .env")
+        msg_erro_url = "⚠️ Erro: URL da API não configurada no .env"
+        print(msg_erro_url)
+        registrar_log(msg_erro_url)
         return False
 
     try:
@@ -358,11 +412,18 @@ def comunicar_API(dados_json):
 
         # O 'ok' é um meio de saber se deu certo o envio para a API, poderia ser [200, 201] tbm
         if resposta.ok:
-            print(f"🌐 Dados enviados para a API com sucesso - (Status: {resposta.status_code})")
+            msg_api_sucesso = f"🌐 Dados enviados para a API com sucesso - (Status: {resposta.status_code})"
+            print(msg_api_sucesso)
+            registrar_log(msg_api_sucesso)
             return True
         else:
-            print(f"❌ Falha no envio para a API - Erro: {resposta.status_code}")
-            print(f"🔍 Detalhes do servidor: {resposta.text}") # Ajuda muito no debug
+            msg_api_falha = f"❌ Falha no envio para a API - Erro: {resposta.status_code}"
+            print(msg_api_falha)
+            registrar_log(msg_api_falha)
+            
+            msg_api_detalhes = f"🔍 Detalhes do servidor: {resposta.text}"
+            print(msg_api_detalhes) # Ajuda muito no debug para saber a resposta da API
+            registrar_log(msg_api_detalhes)
             
             try:
                 os.makedirs(pasta_json, exist_ok=True)
@@ -374,22 +435,28 @@ def comunicar_API(dados_json):
                     "timestamp": timestamp,
                     "status_code": resposta.status_code,
                     "resposta_api": resposta.text,
-                    "payload_enviado": dados_json  # aqui você vê exatamente o que foi mandado
+                    "payload_enviado": dados_json  # aqui eu consigo ver exatamente o que foi mandado
                 }
                 
                 with open(caminho_log, 'w', encoding='utf-8') as f:
                     json.dump(log_erro, f, ensure_ascii=False, indent=4)
                     
-                print(f"📝 Log de erro salvo em: {nome_log}")
+                msg_log_salvo = f"📝 Log de erro salvo em: {nome_log}"
+                print(msg_log_salvo)
+                registrar_log(msg_log_salvo)
             except Exception as e_log:
-                print(f"⚠️ Não foi possível salvar o log de erro: {e_log}")
+                msg_erro_salvar_log = f"⚠️ Não foi possível salvar o log de erro: {e_log}"
+                print(msg_erro_salvar_log)
+                registrar_log(msg_erro_salvar_log)
             
             return False
 
     except requests.exceptions.RequestException as e:
         
         # Captura erros de rede (ex: cabo desconectado, servidor offline)
-        print(f"📡 Erro de conexão com a API: {e}")
+        msg_erro_conexao = f"📡 Erro de conexão com a API: {e}"
+        print(msg_erro_conexao)
+        registrar_log(msg_erro_conexao)
         return False
 
 # -------------------------------
@@ -405,27 +472,38 @@ def get_hora_atual() -> str:
 # --------------------------------------------------------------------------------------------------------------------
 
 def main():
-    print(f"\n🪆  Lucy iniciando seus serviços - {get_hora_atual()}")
+    msg_lucy_iniciando = f"\n🪆  Lucy iniciando seus serviços - {get_hora_atual()}"
+    print(msg_lucy_iniciando)
+    registrar_log(msg_lucy_iniciando.strip())
     
     try:
         
         if not os.path.exists(pasta_pdf):
-            print(f"⚠️  Pasta de PDF não encontrada: {pasta_pdf}")
+            msg_pasta_nao_enc = f"⚠️  Pasta de PDF não encontrada: {pasta_pdf}"
+            print(msg_pasta_nao_enc)
+            registrar_log(msg_pasta_nao_enc)
             return 
 
         # Pegamos todos os arquivos .pdf da pasta
         arquivos = [os.path.join(pasta_pdf, f) for f in os.listdir(pasta_pdf) if f.endswith('.pdf')]
         
         if not arquivos:
-            print("🔕 Nenhum arquivo PDF encontrado para processar")
+            msg_nenhum_pdf = "🔕 Nenhum arquivo PDF encontrado para processar"
+            print(msg_nenhum_pdf)
+            registrar_log(msg_nenhum_pdf)
             return
 
         # Ordenando os arquivos pela data de modificação e pegamos o último (o mais novo)
         arquivo_mais_recente = max(arquivos, key=os.path.getmtime)
         nome_arquivo = os.path.basename(arquivo_mais_recente)
         
-        print("-" * 70)
-        print(f"📍 Alvo identificado: {nome_arquivo}")
+        msg_separador_1 = "-" * 70
+        print(msg_separador_1)
+        registrar_log(msg_separador_1)
+        
+        msg_alvo_id = f"📍 Alvo identificado: {nome_arquivo}"
+        print(msg_alvo_id)
+        registrar_log(msg_alvo_id)
 
         texto_pdf = extrair_texto_do_pdf(arquivo_mais_recente)
         
@@ -434,7 +512,9 @@ def main():
             # Extração dos dados base e da lista completa de itens
             dados_base, lista_de_itens = processar_informacoes(texto_pdf, arquivo_mais_recente)
             
-            print(f"📦 Extraídos {len(lista_de_itens)} itens da tabela. Iniciando registros...")
+            msg_itens_extraidos = f"📦 Extraídos {len(lista_de_itens)} itens da tabela - Iniciando registros"
+            print(msg_itens_extraidos)
+            registrar_log(msg_itens_extraidos)
 
             itens_sucesso = 0
             
@@ -447,7 +527,9 @@ def main():
                 if comunicar_API(payload):
                     itens_sucesso = itens_sucesso + 1
                 else:
-                    print(f"❌ Falha ao registrar item {item_tabela['item']}.")
+                    msg_falha_registrar = f"❌ Falha ao registrar item {item_tabela['item']}"
+                    print(msg_falha_registrar)
+                    registrar_log(msg_falha_registrar)
 
             if itens_sucesso > 0:
                 
@@ -469,19 +551,32 @@ def main():
                     log_local["itens_completos"] = lista_de_itens
                     json.dump(log_local, f, ensure_ascii=False, indent=4)
                 
-                print(f"✅ Backup local salvo em: {nome_json} - {caminho_salvamento}")
+                msg_backup_salvo = f"✅ Backup local salvo em: {nome_json} - {caminho_salvamento}"
+                print(msg_backup_salvo)
+                registrar_log(msg_backup_salvo)
 
             # Print final de resumo do arquivo (fora do loop dos itens), garante no nome de todos os itens da lista (tabela)
             if itens_sucesso == len(lista_de_itens):
-                print(f"📸 Todos os {len(lista_de_itens)} itens de '{nome_arquivo}' foram registrados")
+                msg_todos_registrados = f"📸 Todos os {len(lista_de_itens)} itens de '{nome_arquivo}' foram registrados"
+                print(msg_todos_registrados)
+                registrar_log(msg_todos_registrados)
             else:
-                print(f"⚠️  Atenção: Apenas {itens_sucesso}/{len(lista_de_itens)} itens foram registrados")
+                msg_alguns_registrados = f"⚠️  Atenção: Apenas {itens_sucesso}/{len(lista_de_itens)} itens foram registrados"
+                print(msg_alguns_registrados)
+                registrar_log(msg_alguns_registrados)
                 
     except Exception as e:
-        print(f"⚠️  Erro durante a extração: {e}")
+        msg_erro_extracao = f"⚠️  Erro durante a extração: {e}"
+        print(msg_erro_extracao)
+        registrar_log(msg_erro_extracao)
         
-    print(f"\n💤  Lucy encerrando suas atividades - {get_hora_atual()}")
-    print("-" * 70 + "\n")
+    msg_lucy_encerrando = f"\n💤  Lucy encerrando suas atividades - {get_hora_atual()}"
+    print(msg_lucy_encerrando)
+    registrar_log(msg_lucy_encerrando.strip())
+    
+    msg_separador_2 = "-" * 70
+    print(msg_separador_2 + "\n")
+    registrar_log(msg_separador_2)
 
 # O 'if __name__' garante que o robô só comece a rodar se este arquivo for executado diretamente
 # isso evita que o loop infinito da Lucy ligue sozinho caso as funções sejam importadas em outro arquivo
