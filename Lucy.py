@@ -1,16 +1,17 @@
 # Projeto Lucy - Extração de informação de relatórios PDF e criação de JSON
 
-# Bibliotecas usadas no projeto
-import os # Para poder conversar com o SO
-import json # Precisa dela para a geração dos arquivos JSON que serão o log do projeto
-import re # Vem de Regex, é especialista em padões, não procura palavras em si. É muito importante para capturar datas e números
-import camelot # Especializada em extrair informações de PDF's em coordenadas espaciais (x e Y), uso em conjunto com a pypdf
-import requests # Necessária para a comunicação direta com a API
-from pypdf import PdfReader # Para trabalharmos com os PDF's, descobri ao longo de testes que ela n é boa com tabelas
-from datetime import datetime # O datetime é necessário para situações aonde preciso da data e hora
-from pathlib import Path # Usada quando precisamos navegar por pastas de arquivos
-from dotenv import load_dotenv # Para carregar o arquivo .env, com ele eu consigo trancar tudo e deixar o repositório público :D
-
+# ----------------------------------------------------------------------------------
+# Bibliotecas usadas no projeto ([*N*] -> Nativa, [*E*] -> Externa)
+# ----------------------------------------------------------------------------------
+import os                               # [*N*] - Para poder conversar com o SO
+import re                               # [*N*] - Vem de Regex, é especialista em padões, não procura palavras em si. É muito importante para capturar datas e números
+import json                             # [*N*] - Precisa dela para a geração dos arquivos JSON que serão o log do projeto
+import camelot                          # [*E*] - Especializada em extrair informações de PDF's em coordenadas espaciais (x e Y), uso em conjunto com a pypdf
+import requests                         # [*E*] - Necessária para a comunicação direta com a API
+from pathlib import Path                # [*N*] - Usada quando precisamos navegar por pastas de arquivos
+from pypdf import PdfReader             # [*E*] - Para trabalharmos com os PDF's, descobri ao longo de testes que ela n é boa com tabelas
+from datetime import datetime           # [*N*] - O datetime é necessário para situações aonde preciso da data e hora
+from dotenv import load_dotenv          # [*E*] - Para carregar o arquivo .env, com ele eu consigo trancar tudo e deixar o repositório público :D
 # --------------------------------------------------------------------------------------------------------------------
 # ORGANIZANDO AS VARIÁVEIS GLOBAIS
 # --------------------------------------------------------------------------------------------------------------------
